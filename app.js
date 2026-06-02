@@ -18,6 +18,7 @@ const STOCK_QUOTE_STALE_DAYS = 7;
 const REAL_ESTATE_STREET_SAMPLE_MIN = 5;
 const REAL_ESTATE_COMPARABLE_SAMPLE_MIN = 5;
 const REAL_ESTATE_SEASON_COUNT = 4;
+const REAL_ESTATE_PARKING_SAMPLE_MIN = 10;
 
 const assetCategories = ["現金", "銀行餘額", "證券戶現金", "股票市值", "基金/ETF", "房地產", "外幣", "保單", "其他資產"];
 const liabilityCategories = ["房貸", "理財型房貸已動用", "信貸", "車貸", "信用卡", "私人借款", "其他負債"];
@@ -85,6 +86,7 @@ const els = {
   realEstateDistrict: $("#realEstateDistrict"),
   realEstateArea: $("#realEstateArea"),
   realEstateStreet: $("#realEstateStreet"),
+  realEstateParkingCount: $("#realEstateParkingCount"),
   realEstateMortgage: $("#realEstateMortgage"),
   fetchRealEstateEstimateButton: $("#fetchRealEstateEstimateButton"),
   applyRealEstateEstimateButton: $("#applyRealEstateEstimateButton"),
@@ -618,10 +620,12 @@ function clearRealEstateEstimate() {
   delete els.applyRealEstateEstimateButton.dataset.districtSampleCount;
   delete els.applyRealEstateEstimateButton.dataset.streetSampleCount;
   delete els.applyRealEstateEstimateButton.dataset.parkingAdjustedCount;
+  delete els.applyRealEstateEstimateButton.dataset.parkingEstimatedCount;
   delete els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount;
   delete els.applyRealEstateEstimateButton.dataset.comparableSampleCount;
   delete els.applyRealEstateEstimateButton.dataset.usedComparableOnly;
   delete els.applyRealEstateEstimateButton.dataset.periodsFetched;
+  delete els.applyRealEstateEstimateButton.dataset.parkingPricePerSpace;
   els.realEstateEstimateStatus.textContent =
     "此為不含車位的純房屋參考估值，不代表即時成交價或鑑價結果；可填路段讓估值優先使用同路段樣本，房產估值需由你確認後才會套用。";
 }
@@ -642,6 +646,7 @@ function setRealEstateEstimateDataset(estimate) {
   els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount = String(estimate.parkingUnadjustedCount || 0);
   els.applyRealEstateEstimateButton.dataset.comparableSampleCount = String(estimate.comparableSampleCount || 0);
   els.applyRealEstateEstimateButton.dataset.usedComparableOnly = estimate.usedComparableOnly ? "true" : "false";
+  els.applyRealEstateEstimateButton.dataset.parkingPricePerSpace = String(estimate.parkingPricePerSpace || 0);
 }
 
 function toRealEstateEstimatePayload(estimate) {
@@ -656,10 +661,15 @@ function toRealEstateEstimatePayload(estimate) {
     districtSampleCount: Number(estimate.districtSampleCount) || 0,
     streetSampleCount: Number(estimate.streetSampleCount) || 0,
     parkingAdjustedCount: Number(estimate.parkingAdjustedCount) || 0,
+    parkingEstimatedCount: Number(estimate.parkingEstimatedCount) || 0,
     parkingUnadjustedCount: Number(estimate.parkingUnadjustedCount) || 0,
     comparableSampleCount: Number(estimate.comparableSampleCount) || 0,
     usedComparableOnly: Boolean(estimate.usedComparableOnly),
     periodsFetched: Number(estimate.periodsFetched) || 0,
+    parkingPricePerSpace: Number(estimate.parkingPricePerSpace) || 0,
+    parkingPriceSampleCount: Number(estimate.parkingPriceSampleCount) || 0,
+    parkingCount: Number(estimate.parkingCount) || 0,
+    parkingTotal: (Number(estimate.parkingPricePerSpace) || 0) * (Number(estimate.parkingCount) || 0),
     source: "內政部實價登錄 Open Data",
     fetchedAt: new Date().toISOString(),
   };
@@ -691,6 +701,7 @@ function resetForm() {
   els.realEstateDistrict.value = "";
   els.realEstateArea.value = "";
   els.realEstateStreet.value = "";
+  els.realEstateParkingCount.value = "0";
   els.realEstateMortgage.value = "";
   clearRealEstateEstimate();
   updateRealEstateFields();
@@ -800,6 +811,7 @@ function renderRealEstateDetails(entry) {
       <span>房產淨值 ${formatMoney(equity)}</span>
       <span>${escapeHtml(entry.realEstate.city || "")}${escapeHtml(entry.realEstate.district || "")}${entry.realEstate.street ? ` · ${escapeHtml(entry.realEstate.street)}` : ""} · ${formatPrice(entry.realEstate.buildingAreaPing)} 坪 · ${method} · 信心 ${confidence}</span>
       ${estimate ? `<span>參考估值 ${formatMoney(estimate.amount)}（不含車位純房屋） · ${escapeHtml(estimate.scope || "行政區")} · ${estimate.sampleCount || 0} 筆 · 信心 ${escapeHtml(estimate.confidence || "低")}</span>` : ""}
+      ${estimate && estimate.parkingCount ? `<span>車位 ${estimate.parkingCount} 個約 ${formatMoney(estimate.parkingTotal || 0)}（每個 ${formatMoney(estimate.parkingPricePerSpace || 0)}）</span>` : ""}
     </div>
   `;
 }
@@ -1211,21 +1223,27 @@ async function handleSubmit(event) {
         priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
       }
     : null;
-  const appliedRealEstateEstimateAmount = Number(els.applyRealEstateEstimateButton.dataset.amount);
+  const appliedRealEstateBuildingAmount = Number(els.applyRealEstateEstimateButton.dataset.amount);
+  const appliedParkingPricePerSpace = Number(els.applyRealEstateEstimateButton.dataset.parkingPricePerSpace) || 0;
+  const realEstateParkingCount = Math.max(0, Math.round(Number(els.realEstateParkingCount.value) || 0));
+  const appliedRealEstateEstimateTotal = appliedRealEstateBuildingAmount + appliedParkingPricePerSpace * realEstateParkingCount;
   const usesReferenceEstimate =
-    appliedRealEstateEstimateAmount > 0 && appliedRealEstateEstimateAmount === Math.round(Number(els.entryAmount.value));
+    appliedRealEstateBuildingAmount > 0 && appliedRealEstateEstimateTotal === Math.round(Number(els.entryAmount.value));
   const realEstate = isRealEstateEntry()
     ? {
         city: els.realEstateCity.value,
         district: els.realEstateDistrict.value.trim(),
         buildingAreaPing: Number(els.realEstateArea.value),
         street: els.realEstateStreet.value.trim(),
+        parkingCount: realEstateParkingCount,
         valuationMethod: usesReferenceEstimate ? "實價登錄參考" : "手動輸入",
         confidence: usesReferenceEstimate ? els.applyRealEstateEstimateButton.dataset.confidence || "低" : "低",
         linkedLiabilityId: els.realEstateMortgage.value || null,
         estimate: usesReferenceEstimate
           ? toRealEstateEstimatePayload({
-              amount: appliedRealEstateEstimateAmount,
+              amount: appliedRealEstateBuildingAmount,
+              parkingPricePerSpace: appliedParkingPricePerSpace,
+              parkingCount: realEstateParkingCount,
               confidence: els.applyRealEstateEstimateButton.dataset.confidence,
               sampleCount: els.applyRealEstateEstimateButton.dataset.sampleCount,
               period: els.applyRealEstateEstimateButton.dataset.period,
@@ -1235,6 +1253,7 @@ async function handleSubmit(event) {
               districtSampleCount: els.applyRealEstateEstimateButton.dataset.districtSampleCount,
               streetSampleCount: els.applyRealEstateEstimateButton.dataset.streetSampleCount,
               parkingAdjustedCount: els.applyRealEstateEstimateButton.dataset.parkingAdjustedCount,
+              parkingEstimatedCount: els.applyRealEstateEstimateButton.dataset.parkingEstimatedCount,
               parkingUnadjustedCount: els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount,
               comparableSampleCount: els.applyRealEstateEstimateButton.dataset.comparableSampleCount,
               usedComparableOnly: els.applyRealEstateEstimateButton.dataset.usedComparableOnly === "true",
@@ -1298,6 +1317,7 @@ function editEntry(id) {
   els.realEstateDistrict.value = entry.realEstate?.district || "";
   els.realEstateArea.value = entry.realEstate?.buildingAreaPing || "";
   els.realEstateStreet.value = entry.realEstate?.street || "";
+  els.realEstateParkingCount.value = entry.realEstate?.parkingCount || 0;
   syncRealEstateMortgageOptions(entry.realEstate?.linkedLiabilityId || "");
   clearRealEstateEstimate();
   if (entry.realEstate?.estimate) {
@@ -1637,7 +1657,7 @@ function parseLvrSamples(text, district) {
 
   return records
     .map((row) => {
-      const unitPricePerSquareMeter = Number(row[unitPriceIndex]);
+      const rawUnitPricePerSquareMeter = Number(row[unitPriceIndex]);
       const totalPrice = Number(row[priceIndex]);
       const buildingArea = Number(row[areaIndex]);
       const parkingArea = Number(row[parkingAreaIndex]);
@@ -1646,25 +1666,18 @@ function parseLvrSamples(text, district) {
       const note = row[noteIndex] || "";
       const date = parseMinguoDate(row[dateIndex]);
       const hasParking = target.includes("車位") || parkingArea > 0;
-      const canAdjustParking = hasParking && parkingArea > 0 && parkingPrice > 0 && totalPrice > parkingPrice && buildingArea > parkingArea;
-      const adjustedUnitPricePerSquareMeter = canAdjustParking
-        ? Math.round((totalPrice - parkingPrice) / (buildingArea - parkingArea))
-        : unitPricePerSquareMeter;
       return {
         district: row[districtIndex],
         target,
         address: row[addressIndex] || "",
         buildingType: row[typeIndex] || "",
         use: row[useIndex] || "",
-        unitPricePerSquareMeter: adjustedUnitPricePerSquareMeter,
+        rawUnitPricePerSquareMeter,
         totalPrice,
         buildingArea,
         parkingArea,
         parkingPrice,
         hasParking,
-        parkingAdjusted: canAdjustParking,
-        parkingUnadjusted: hasParking && !canAdjustParking,
-        isComparableUnitPrice: !hasParking || canAdjustParking,
         note,
         date,
       };
@@ -1673,10 +1686,42 @@ function parseLvrSamples(text, district) {
       if (row.district !== district) return false;
       if (!row.target.includes("房地")) return false;
       if (row.target.includes("車位") && !row.target.includes("建物")) return false;
-      if (!(row.unitPricePerSquareMeter > 0) || !(row.totalPrice > 0) || !(row.buildingArea > 0)) return false;
+      if (!(row.rawUnitPricePerSquareMeter > 0) || !(row.totalPrice > 0) || !(row.buildingArea > 0)) return false;
       if (row.note.includes("特殊") || row.note.includes("親友") || row.note.includes("僅車位")) return false;
       return row.use.includes("住") || row.buildingType.includes("住宅") || row.buildingType.includes("公寓") || row.buildingType.includes("華廈");
     });
+}
+
+// 把含車位樣本還原成「純房屋」單價:有車位價的直接拆,缺車位價的用區域車位行情(每平方公尺中位數)推估後拆，
+// 讓單價基準與使用者輸入的「不含車位」坪數一致。
+function applyParkingExcludedPricing(samples) {
+  const pricedParking = samples.filter(
+    (s) => s.parkingArea > 0 && s.parkingPrice > 0 && s.buildingArea > s.parkingArea && s.totalPrice > s.parkingPrice
+  );
+  const hasEnoughParkingRates = pricedParking.length >= REAL_ESTATE_PARKING_SAMPLE_MIN;
+  const parkingRatePerSquareMeter = hasEnoughParkingRates ? median(pricedParking.map((s) => s.parkingPrice / s.parkingArea)) : 0;
+  const parkingPricePerSpace = hasEnoughParkingRates ? Math.round(median(pricedParking.map((s) => s.parkingPrice))) : 0;
+
+  for (const sample of samples) {
+    const buildingOnlyArea = sample.buildingArea - sample.parkingArea;
+    const hasActualParkingPrice = sample.parkingPrice > 0 && sample.totalPrice > sample.parkingPrice;
+    const parkingValue = hasActualParkingPrice
+      ? sample.parkingPrice
+      : sample.parkingArea > 0 && parkingRatePerSquareMeter > 0
+        ? Math.round(sample.parkingArea * parkingRatePerSquareMeter)
+        : 0;
+    const canExclude = sample.parkingArea > 0 && buildingOnlyArea > 0 && parkingValue > 0 && sample.totalPrice > parkingValue;
+
+    sample.parkingAdjusted = canExclude && hasActualParkingPrice;
+    sample.parkingEstimated = canExclude && !hasActualParkingPrice;
+    sample.parkingUnadjusted = sample.hasParking && !canExclude;
+    sample.unitPricePerSquareMeter = canExclude
+      ? Math.round((sample.totalPrice - parkingValue) / buildingOnlyArea)
+      : sample.rawUnitPricePerSquareMeter;
+    sample.isComparableUnitPrice = !sample.hasParking || canExclude;
+  }
+
+  return { samples, parkingRatePerSquareMeter, parkingPricePerSpace, parkingRateSampleCount: pricedParking.length };
 }
 
 function dedupeLvrSamples(samples) {
@@ -1712,6 +1757,7 @@ async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPi
 
   if (!samples.length) throw new Error("No samples");
 
+  const { parkingPricePerSpace, parkingRateSampleCount } = applyParkingExcludedPricing(samples);
   const sampleSet = pickRealEstateEstimateSamples(samples, street);
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -1736,11 +1782,14 @@ async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPi
     districtSampleCount: sampleSet.districtSampleCount,
     streetSampleCount: sampleSet.streetSampleCount,
     parkingAdjustedCount: estimateSamples.filter((sample) => sample.parkingAdjusted).length,
+    parkingEstimatedCount: estimateSamples.filter((sample) => sample.parkingEstimated).length,
     parkingUnadjustedCount: estimateSamples.filter((sample) => sample.parkingUnadjusted).length,
     comparableSampleCount: comparableSet.comparableSampleCount,
     usedComparableOnly: comparableSet.usedComparableOnly,
     fallbackReason: sampleSet.fallbackReason,
     periodsFetched,
+    parkingPricePerSpace,
+    parkingPriceSampleCount: parkingRateSampleCount,
     source,
   };
 }
@@ -1757,17 +1806,21 @@ function renderRealEstateEstimateStatus(estimate) {
       : `樣本 ${estimate.sampleCount} 筆；期間 ${estimate.period}。${periodsDetail}`;
   const fallback = estimate.fallbackReason ? `${estimate.fallbackReason} ` : "";
   const parkingDetail = [
-    estimate.parkingAdjustedCount ? `已拆算車位 ${estimate.parkingAdjustedCount} 筆` : "",
-    estimate.parkingUnadjustedCount ? `${estimate.parkingUnadjustedCount} 筆含車位但缺車位價格，可能拉低單價` : "",
+    estimate.parkingAdjustedCount ? `已用實際車位價拆算 ${estimate.parkingAdjustedCount} 筆` : "",
+    estimate.parkingEstimatedCount ? `用區域車位行情還原純房屋單價 ${estimate.parkingEstimatedCount} 筆` : "",
+    estimate.parkingUnadjustedCount ? `${estimate.parkingUnadjustedCount} 筆含車位但無法還原，可能拉低單價` : "",
     estimate.usedComparableOnly ? `優先使用可比較樣本 ${estimate.comparableSampleCount} 筆` : "",
   ]
     .filter(Boolean)
     .join("；");
+  const parkingPriceDetail = estimate.parkingPricePerSpace
+    ? `每個車位約 ${formatMoney(estimate.parkingPricePerSpace)}（全區 ${estimate.parkingPriceSampleCount || 0} 筆中位）；填車位數後套用會自動加總。`
+    : "車位價資料不足，套用後請自行加上車位價值。";
   const guideHint =
     estimate.scope === "同路段"
-      ? "若房產含車位，套用後請手動加上車位價值；若你掌握近期成交價、銀行鑑價或社區行情，仍建議以手動估值為準。"
-      : "目前屬行政區保守參考，較適合當資產盤點下限；若房產含車位，套用後請手動加上車位價值；若你掌握近期成交價、銀行鑑價或社區行情，建議直接手動輸入該金額。";
-  return `參考估值 ${formatMoney(estimate.amount)}（不含車位純房屋估值）；${scopeDetail} ${fallback}${sampleDetail} ${parkingDetail ? `${parkingDetail}。` : ""}信心 ${estimate.confidence}。未依社區、屋齡、樓層、裝潢修正；不代表即時成交價或鑑價結果。${guideHint}`;
+      ? "若你掌握近期成交價、銀行鑑價或社區行情，仍建議以手動估值為準。"
+      : "目前屬行政區保守參考，較適合當資產盤點下限；若你掌握近期成交價、銀行鑑價或社區行情，建議直接手動輸入該金額。";
+  return `參考估值 ${formatMoney(estimate.amount)}（不含車位純房屋估值）；${scopeDetail} ${fallback}${sampleDetail} ${parkingDetail ? `${parkingDetail}。` : ""}${parkingPriceDetail}信心 ${estimate.confidence}。未依社區、屋齡、樓層、裝潢修正；不代表即時成交價或鑑價結果。${guideHint}`;
 }
 
 async function fetchRealEstateEstimate() {
@@ -1798,10 +1851,12 @@ async function fetchRealEstateEstimate() {
     els.applyRealEstateEstimateButton.dataset.districtSampleCount = String(estimate.districtSampleCount);
     els.applyRealEstateEstimateButton.dataset.streetSampleCount = String(estimate.streetSampleCount);
     els.applyRealEstateEstimateButton.dataset.parkingAdjustedCount = String(estimate.parkingAdjustedCount);
+    els.applyRealEstateEstimateButton.dataset.parkingEstimatedCount = String(estimate.parkingEstimatedCount);
     els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount = String(estimate.parkingUnadjustedCount);
     els.applyRealEstateEstimateButton.dataset.comparableSampleCount = String(estimate.comparableSampleCount);
     els.applyRealEstateEstimateButton.dataset.usedComparableOnly = estimate.usedComparableOnly ? "true" : "false";
     els.applyRealEstateEstimateButton.dataset.periodsFetched = String(estimate.periodsFetched);
+    els.applyRealEstateEstimateButton.dataset.parkingPricePerSpace = String(estimate.parkingPricePerSpace);
     els.realEstateEstimateStatus.textContent = renderRealEstateEstimateStatus(estimate);
     showToast("已取得參考估值");
   } catch {
@@ -1815,10 +1870,16 @@ async function fetchRealEstateEstimate() {
 }
 
 function applyRealEstateEstimate() {
-  const amount = Number(els.applyRealEstateEstimateButton.dataset.amount);
-  if (!(amount > 0)) return;
-  els.entryAmount.value = String(amount);
-  els.realEstateEstimateStatus.textContent = `已套用參考估值 ${formatMoney(amount)}；房產估值需儲存後才會更新。`;
+  const buildingAmount = Number(els.applyRealEstateEstimateButton.dataset.amount);
+  if (!(buildingAmount > 0)) return;
+  const perSpace = Number(els.applyRealEstateEstimateButton.dataset.parkingPricePerSpace) || 0;
+  const parkingCount = Math.max(0, Math.round(Number(els.realEstateParkingCount.value) || 0));
+  const parkingTotal = perSpace * parkingCount;
+  const total = buildingAmount + parkingTotal;
+  els.entryAmount.value = String(total);
+  els.realEstateEstimateStatus.textContent = parkingTotal
+    ? `已套用 ${formatMoney(total)}＝純房屋 ${formatMoney(buildingAmount)}＋車位 ${parkingCount} × ${formatMoney(perSpace)}；房產估值需儲存後才會更新。`
+    : `已套用參考估值 ${formatMoney(total)}；房產估值需儲存後才會更新。`;
   showToast("已套用參考估值，請儲存項目");
 }
 
@@ -1839,7 +1900,7 @@ async function updateRealEstateEstimateForEntry(id, button) {
       ...entry,
       realEstate: {
         ...entry.realEstate,
-        estimate: toRealEstateEstimatePayload(estimate),
+        estimate: toRealEstateEstimatePayload({ ...estimate, parkingCount: Number(entry.realEstate.parkingCount) || 0 }),
       },
     };
     await putItem(STORE_ENTRIES, normalizeEntry(nextEntry));
