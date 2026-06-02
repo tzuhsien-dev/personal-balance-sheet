@@ -17,6 +17,7 @@ const ENTRY_STALE_DAYS = 30;
 const STOCK_QUOTE_STALE_DAYS = 7;
 const REAL_ESTATE_STREET_SAMPLE_MIN = 5;
 const REAL_ESTATE_COMPARABLE_SAMPLE_MIN = 5;
+const REAL_ESTATE_SEASON_COUNT = 4;
 
 const assetCategories = ["現金", "銀行餘額", "證券戶現金", "股票市值", "基金/ETF", "房地產", "外幣", "保單", "其他資產"];
 const liabilityCategories = ["房貸", "理財型房貸已動用", "信貸", "車貸", "信用卡", "私人借款", "其他負債"];
@@ -620,6 +621,7 @@ function clearRealEstateEstimate() {
   delete els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount;
   delete els.applyRealEstateEstimateButton.dataset.comparableSampleCount;
   delete els.applyRealEstateEstimateButton.dataset.usedComparableOnly;
+  delete els.applyRealEstateEstimateButton.dataset.periodsFetched;
   els.realEstateEstimateStatus.textContent =
     "此為不含車位的純房屋參考估值，不代表即時成交價或鑑價結果；可填路段讓估值優先使用同路段樣本，房產估值需由你確認後才會套用。";
 }
@@ -657,6 +659,7 @@ function toRealEstateEstimatePayload(estimate) {
     parkingUnadjustedCount: Number(estimate.parkingUnadjustedCount) || 0,
     comparableSampleCount: Number(estimate.comparableSampleCount) || 0,
     usedComparableOnly: Boolean(estimate.usedComparableOnly),
+    periodsFetched: Number(estimate.periodsFetched) || 0,
     source: "內政部實價登錄 Open Data",
     fetchedAt: new Date().toISOString(),
   };
@@ -1235,6 +1238,7 @@ async function handleSubmit(event) {
               parkingUnadjustedCount: els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount,
               comparableSampleCount: els.applyRealEstateEstimateButton.dataset.comparableSampleCount,
               usedComparableOnly: els.applyRealEstateEstimateButton.dataset.usedComparableOnly === "true",
+              periodsFetched: els.applyRealEstateEstimateButton.dataset.periodsFetched,
             })
           : null,
       }
@@ -1597,12 +1601,23 @@ function getRealEstateComparableSamples(samples) {
   };
 }
 
-async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPing, street }) {
-  const cityCode = realEstateCities.find(([name]) => name === city)?.[1];
-  if (!cityCode || !district || !(buildingAreaPing > 0)) throw new Error("Missing real estate inputs");
+function recentLvrSeasons(count) {
+  const now = new Date();
+  let rocYear = now.getFullYear() - 1911;
+  let quarter = Math.floor(now.getMonth() / 3) + 1;
+  const seasons = [];
+  for (let i = 0; i < count; i += 1) {
+    quarter -= 1;
+    if (quarter < 1) {
+      quarter = 4;
+      rocYear -= 1;
+    }
+    seasons.push(`${rocYear}S${quarter}`);
+  }
+  return seasons;
+}
 
-  const sourceUrl = `https://plvr.land.moi.gov.tw/Download?fileName=${cityCode}_lvr_land_A.csv`;
-  const { text, source } = await fetchTextWithProxyFallback(sourceUrl);
+function parseLvrSamples(text, district) {
   const rows = parseCsvRows(text);
   const headers = rows[0] || [];
   const records = rows.slice(2);
@@ -1620,7 +1635,7 @@ async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPi
   const parkingPriceIndex = indexOf("車位總價元");
   const noteIndex = indexOf("備註");
 
-  const samples = records
+  return records
     .map((row) => {
       const unitPricePerSquareMeter = Number(row[unitPriceIndex]);
       const totalPrice = Number(row[priceIndex]);
@@ -1662,6 +1677,38 @@ async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPi
       if (row.note.includes("特殊") || row.note.includes("親友") || row.note.includes("僅車位")) return false;
       return row.use.includes("住") || row.buildingType.includes("住宅") || row.buildingType.includes("公寓") || row.buildingType.includes("華廈");
     });
+}
+
+function dedupeLvrSamples(samples) {
+  const seen = new Set();
+  const result = [];
+  for (const sample of samples) {
+    const key = `${sample.address}|${sample.date || ""}|${sample.totalPrice}|${sample.buildingArea}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(sample);
+  }
+  return result;
+}
+
+async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPing, street }) {
+  const cityCode = realEstateCities.find(([name]) => name === city)?.[1];
+  if (!cityCode || !district || !(buildingAreaPing > 0)) throw new Error("Missing real estate inputs");
+
+  const sourceUrls = [
+    `https://plvr.land.moi.gov.tw/Download?fileName=${cityCode}_lvr_land_A.csv`,
+    ...recentLvrSeasons(REAL_ESTATE_SEASON_COUNT).map(
+      (season) => `https://plvr.land.moi.gov.tw/DownloadSeason?season=${season}&fileName=${cityCode}_lvr_land_A.csv&type=csv`
+    ),
+  ];
+
+  const results = await Promise.allSettled(sourceUrls.map((url) => fetchTextWithProxyFallback(url)));
+  const texts = results.filter((result) => result.status === "fulfilled").map((result) => result.value.text);
+  if (!texts.length) throw new Error("No real estate data");
+
+  const source = "內政部實價登錄 Open Data";
+  const periodsFetched = texts.length;
+  const samples = dedupeLvrSamples(texts.flatMap((text) => parseLvrSamples(text, district)));
 
   if (!samples.length) throw new Error("No samples");
 
@@ -1693,6 +1740,7 @@ async function fetchRealEstateReferenceEstimate({ city, district, buildingAreaPi
     comparableSampleCount: comparableSet.comparableSampleCount,
     usedComparableOnly: comparableSet.usedComparableOnly,
     fallbackReason: sampleSet.fallbackReason,
+    periodsFetched,
     source,
   };
 }
@@ -1702,10 +1750,11 @@ function renderRealEstateEstimateStatus(estimate) {
     estimate.scope === "同路段"
       ? `估值方式：${estimate.street} 同路段住宅交易，每坪中位數 ${formatMoney(estimate.medianUnitPricePerPing)}。`
       : `估值方式：${estimate.period} ${estimate.scope}住宅交易，每坪中位數 ${formatMoney(estimate.medianUnitPricePerPing)}。`;
+  const periodsDetail = estimate.periodsFetched ? `整合 ${estimate.periodsFetched} 期資料。` : "";
   const sampleDetail =
     estimate.street && estimate.scope !== "同路段"
-      ? `同路段樣本 ${estimate.streetSampleCount} 筆；行政區樣本 ${estimate.districtSampleCount} 筆。`
-      : `樣本 ${estimate.sampleCount} 筆；期間 ${estimate.period}。`;
+      ? `同路段樣本 ${estimate.streetSampleCount} 筆；行政區樣本 ${estimate.districtSampleCount} 筆。${periodsDetail}`
+      : `樣本 ${estimate.sampleCount} 筆；期間 ${estimate.period}。${periodsDetail}`;
   const fallback = estimate.fallbackReason ? `${estimate.fallbackReason} ` : "";
   const parkingDetail = [
     estimate.parkingAdjustedCount ? `已拆算車位 ${estimate.parkingAdjustedCount} 筆` : "",
@@ -1734,7 +1783,7 @@ async function fetchRealEstateEstimate() {
 
   els.fetchRealEstateEstimateButton.disabled = true;
   const originalText = els.fetchRealEstateEstimateButton.textContent;
-  els.fetchRealEstateEstimateButton.textContent = "估算中...";
+  els.fetchRealEstateEstimateButton.textContent = "讀取多期資料...";
   clearRealEstateEstimate();
   try {
     const estimate = await fetchRealEstateReferenceEstimate({ city, district, buildingAreaPing, street });
@@ -1752,6 +1801,7 @@ async function fetchRealEstateEstimate() {
     els.applyRealEstateEstimateButton.dataset.parkingUnadjustedCount = String(estimate.parkingUnadjustedCount);
     els.applyRealEstateEstimateButton.dataset.comparableSampleCount = String(estimate.comparableSampleCount);
     els.applyRealEstateEstimateButton.dataset.usedComparableOnly = estimate.usedComparableOnly ? "true" : "false";
+    els.applyRealEstateEstimateButton.dataset.periodsFetched = String(estimate.periodsFetched);
     els.realEstateEstimateStatus.textContent = renderRealEstateEstimateStatus(estimate);
     showToast("已取得參考估值");
   } catch {
