@@ -1307,8 +1307,10 @@ async function fetchTwStockQuote(symbol) {
     try {
       const data = await fetchQuoteJson(sourceUrl);
       const quote = data?.msgArray?.[0];
-      const rawPrice = quote?.z && quote.z !== "-" ? quote.z : quote?.pz;
-      const price = Number(rawPrice);
+      if (!quote) continue;
+      const livePrice = pickQuotePrice(quote.z) ?? pickQuotePrice(quote.pz);
+      const prevClose = pickQuotePrice(quote.y);
+      const price = livePrice ?? prevClose;
       if (price > 0) {
         return {
           symbol: cleanSymbol,
@@ -1316,6 +1318,7 @@ async function fetchTwStockQuote(symbol) {
           price,
           exchange: exchange.label,
           fetchedAt: new Date().toISOString(),
+          isLive: livePrice != null,
         };
       }
     } catch {
@@ -1324,6 +1327,12 @@ async function fetchTwStockQuote(symbol) {
   }
 
   throw new Error("Quote unavailable");
+}
+
+function pickQuotePrice(value) {
+  if (value == null || value === "-") return null;
+  const num = Number(value);
+  return num > 0 ? num : null;
 }
 
 async function fetchQuoteJson(sourceUrl) {
@@ -1854,7 +1863,8 @@ async function refreshQuote() {
     els.stockPrice.value = String(quote.price);
     els.quoteStatus.dataset.priceUpdatedAt = quote.fetchedAt;
     els.quoteStatus.dataset.exchange = quote.exchange;
-    els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · 現價 ${formatPrice(quote.price)} · ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
+    const priceLabel = quote.isLive ? "現價" : "昨收";
+    els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · ${priceLabel} ${formatPrice(quote.price)} · ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
     if (!els.entryName.value.trim()) {
       els.entryName.value = `${quote.symbol} ${quote.name}`;
     }
