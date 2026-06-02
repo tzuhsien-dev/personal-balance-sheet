@@ -257,6 +257,11 @@ h3 {
   color: var(--muted);
 }
 
+.health-badge.info {
+  background: var(--soft);
+  color: var(--accent);
+}
+
 .mobile-tab-bar {
   display: none;
 }

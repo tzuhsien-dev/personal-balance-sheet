@@ -407,6 +407,16 @@ function getHealthChecks() {
     });
   }
 
+  const prevCloseStocks = state.entries.filter((entry) => entry.stock?.symbol && entry.stock.priceIsLive === false);
+  if (prevCloseStocks.length) {
+    checks.push({
+      status: "info",
+      title: "股票價格為昨收",
+      description: `${prevCloseStocks.length} 筆股票目前是昨收價（盤前或收盤後抓取）。`,
+      actionHint: "盤中（09:00–13:30）按「更新股價」可取得即時價。",
+    });
+  }
+
   const hasCurrentMonthSnapshot = state.snapshots.some((snapshot) => normalizeSnapshot(snapshot).month === currentMonth());
   if (!hasCurrentMonthSnapshot) {
     checks.push({
@@ -461,6 +471,7 @@ function healthStatusLabel(status) {
   if (status === "ok") return "正常";
   if (status === "danger") return "逾期";
   if (status === "idle") return "開始";
+  if (status === "info") return "資訊";
   return "注意";
 }
 
@@ -947,7 +958,7 @@ function renderSnapshots() {
             <span>淨資產 ${formatMoney(snapshot.netWorth)}</span>
             <span>額度 ${formatMoney(snapshot.totalLimits || 0)}</span>
           </div>
-          ${snapshot.stockQuoteTotal ? `<p class="snapshot-source">股票歷史收盤價 ${snapshot.stockQuoteResolved}/${snapshot.stockQuoteTotal} 筆${snapshot.stockQuoteFailed ? `，${snapshot.stockQuoteFailed} 筆沿用目前價格` : ""}</p>` : ""}
+          ${snapshot.stockQuoteTotal ? `<p class="snapshot-source">股票歷史收盤價 ${snapshot.stockQuoteResolved}/${snapshot.stockQuoteTotal} 筆${snapshot.stockQuoteFailed ? `，${snapshot.stockQuoteFailed} 筆沿用目前價格${snapshot.stockQuoteFallbackPrevClose ? `（含 ${snapshot.stockQuoteFallbackPrevClose} 筆昨收）` : ""}` : ""}</p>` : ""}
         </article>
       `;
     })
@@ -1137,6 +1148,7 @@ function normalizeSnapshot(snapshot) {
     stockQuoteTotal: Number(snapshot.stockQuoteTotal) || 0,
     stockQuoteResolved: Number(snapshot.stockQuoteResolved) || 0,
     stockQuoteFailed: Number(snapshot.stockQuoteFailed) || 0,
+    stockQuoteFallbackPrevClose: Number(snapshot.stockQuoteFallbackPrevClose) || 0,
     assetBreakdown: normalizeBreakdown(snapshot.assetBreakdown),
     liabilityBreakdown: normalizeBreakdown(snapshot.liabilityBreakdown),
     limitBreakdown: normalizeBreakdown(snapshot.limitBreakdown),
@@ -1798,6 +1810,7 @@ async function getMonthlyCloseTotals(month) {
   let stockQuoteTotal = 0;
   let stockQuoteResolved = 0;
   let stockQuoteFailed = 0;
+  let stockQuoteFallbackPrevClose = 0;
   const assetBreakdown = {};
   const liabilityBreakdown = {};
   const limitBreakdown = {};
@@ -1832,6 +1845,7 @@ async function getMonthlyCloseTotals(month) {
         totalAssets += amount;
         addBreakdownAmount(assetBreakdown, entry.category, amount);
         stockQuoteFailed += 1;
+        if (entry.stock.priceIsLive === false) stockQuoteFallbackPrevClose += 1;
       }
       continue;
     }
@@ -1851,6 +1865,7 @@ async function getMonthlyCloseTotals(month) {
     stockQuoteTotal,
     stockQuoteResolved,
     stockQuoteFailed,
+    stockQuoteFallbackPrevClose,
   };
 }
 
@@ -1911,6 +1926,7 @@ async function createSnapshot() {
     stockQuoteTotal: totals.stockQuoteTotal,
     stockQuoteResolved: totals.stockQuoteResolved,
     stockQuoteFailed: totals.stockQuoteFailed,
+    stockQuoteFallbackPrevClose: totals.stockQuoteFallbackPrevClose,
     createdAt: new Date().toISOString(),
   };
   await putItem(STORE_SNAPSHOTS, snapshot);
