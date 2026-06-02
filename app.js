@@ -670,6 +670,9 @@ function resetForm() {
   els.stockSymbol.value = "";
   els.stockShares.value = "";
   els.stockPrice.value = "";
+  delete els.quoteStatus.dataset.priceUpdatedAt;
+  delete els.quoteStatus.dataset.exchange;
+  delete els.quoteStatus.dataset.priceIsLive;
   els.quoteStatus.textContent = "股票市值會用股數 × 現價自動換算。";
   els.realEstateDistrict.value = "";
   els.realEstateArea.value = "";
@@ -746,7 +749,7 @@ function renderEntries() {
         <article class="entry-row ${entry.type}">
           <div class="entry-main">
             <strong>${escapeHtml(entry.name)}</strong>
-            <span>${entry.category} · ${entry.date}${entry.stock ? ` · ${escapeHtml(entry.stock.symbol)} · ${formatShares(entry.stock.shares)} 股 · 現價 ${formatPrice(entry.stock.price)}` : ""}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</span>
+            <span>${entry.category} · ${entry.date}${entry.stock ? ` · ${escapeHtml(entry.stock.symbol)} · ${formatShares(entry.stock.shares)} 股 · ${entry.stock.priceIsLive === false ? "昨收" : "現價"} ${formatPrice(entry.stock.price)}` : ""}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</span>
             ${realEstateDetails}
           </div>
           <div class="entry-amount">${entry.type === "liability" ? "-" : ""}${formatMoney(Number(entry.amount), entry.currency)}</div>
@@ -1190,6 +1193,7 @@ async function handleSubmit(event) {
         price: Number(els.stockPrice.value),
         priceUpdatedAt: els.quoteStatus.dataset.priceUpdatedAt || null,
         exchange: els.quoteStatus.dataset.exchange || null,
+        priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
       }
     : null;
   const appliedRealEstateEstimateAmount = Number(els.applyRealEstateEstimateButton.dataset.amount);
@@ -1270,6 +1274,7 @@ function editEntry(id) {
   els.stockPrice.value = entry.stock?.price || "";
   els.quoteStatus.dataset.priceUpdatedAt = entry.stock?.priceUpdatedAt || "";
   els.quoteStatus.dataset.exchange = entry.stock?.exchange || "";
+  els.quoteStatus.dataset.priceIsLive = entry.stock?.priceIsLive === false ? "false" : "true";
   els.quoteStatus.textContent = entry.stock?.priceUpdatedAt
     ? `現價更新：${new Date(entry.stock.priceUpdatedAt).toLocaleString("zh-TW")}`
     : "股票市值會用股數 × 現價自動換算。";
@@ -1335,11 +1340,18 @@ function pickQuotePrice(value) {
   return num > 0 ? num : null;
 }
 
+const CORS_PROXIES = [
+  { source: "direct", build: (url) => url },
+  { source: "codetabs", build: (url) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}` },
+  { source: "allorigins", build: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` },
+];
+
+function buildProxyAttempts(sourceUrl) {
+  return CORS_PROXIES.map((proxy) => ({ url: proxy.build(sourceUrl), source: proxy.source }));
+}
+
 async function fetchQuoteJson(sourceUrl) {
-  const attempts = [
-    { url: sourceUrl, source: "TWSE" },
-    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(sourceUrl)}`, source: "TWSE proxy" },
-  ];
+  const attempts = buildProxyAttempts(sourceUrl);
 
   for (const attempt of attempts) {
     try {
@@ -1362,10 +1374,7 @@ async function fetchQuoteJson(sourceUrl) {
 }
 
 async function fetchJsonWithProxyFallback(sourceUrl, validator) {
-  const attempts = [
-    { url: sourceUrl, source: "direct" },
-    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(sourceUrl)}`, source: "proxy" },
-  ];
+  const attempts = buildProxyAttempts(sourceUrl);
 
   for (const attempt of attempts) {
     try {
@@ -1388,10 +1397,7 @@ async function fetchJsonWithProxyFallback(sourceUrl, validator) {
 }
 
 async function fetchTextWithProxyFallback(sourceUrl) {
-  const attempts = [
-    { url: sourceUrl, source: "direct" },
-    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(sourceUrl)}`, source: "proxy" },
-  ];
+  const attempts = buildProxyAttempts(sourceUrl);
 
   for (const attempt of attempts) {
     try {
@@ -1863,6 +1869,7 @@ async function refreshQuote() {
     els.stockPrice.value = String(quote.price);
     els.quoteStatus.dataset.priceUpdatedAt = quote.fetchedAt;
     els.quoteStatus.dataset.exchange = quote.exchange;
+    els.quoteStatus.dataset.priceIsLive = String(quote.isLive);
     const priceLabel = quote.isLive ? "現價" : "昨收";
     els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · ${priceLabel} ${formatPrice(quote.price)} · ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
     if (!els.entryName.value.trim()) {
@@ -1925,6 +1932,7 @@ async function refreshAllStockQuotes() {
   const originalText = els.refreshAllQuotesButton.textContent;
   let updated = 0;
   let failed = 0;
+  let prevCloseCount = 0;
 
   for (const [index, entry] of stockEntries.entries()) {
     els.refreshAllQuotesButton.textContent = `${index + 1}/${stockEntries.length}`;
@@ -1940,11 +1948,13 @@ async function refreshAllStockQuotes() {
           price: quote.price,
           priceUpdatedAt: quote.fetchedAt,
           exchange: quote.exchange,
+          priceIsLive: quote.isLive,
         },
         updatedAt: new Date().toISOString(),
       };
       await putItem(STORE_ENTRIES, normalizeEntry(nextEntry));
       updated += 1;
+      if (!quote.isLive) prevCloseCount += 1;
     } catch {
       failed += 1;
     }
@@ -1953,7 +1963,8 @@ async function refreshAllStockQuotes() {
   els.refreshAllQuotesButton.disabled = false;
   els.refreshAllQuotesButton.textContent = originalText;
   await loadData();
-  showToast(failed ? `已更新 ${updated} 筆，${failed} 筆失敗` : `已更新 ${updated} 筆股價`);
+  const prevCloseNote = prevCloseCount ? `（${prevCloseCount} 筆為昨收）` : "";
+  showToast(failed ? `已更新 ${updated} 筆${prevCloseNote}，${failed} 筆失敗` : `已更新 ${updated} 筆股價${prevCloseNote}`);
 }
 
 function downloadJson(filename, payload) {
