@@ -29,6 +29,7 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 - 趨勢圖與月結洞察：查看淨資產、資產、負債、額度趨勢，並分析最新月結相對前一筆的主要變化。
 - 健康檢查：提醒資料是否太久未更新、股票價格是否過期、本月是否尚未月結、備份是否逾期。
 - 加密備份：匯出 `.encrypted.json`，使用瀏覽器 Web Crypto API 加密。
+- 分析用匯出：產生未加密 JSON，排除名稱、備註、街道與內部 ID，保留金額、持股、匿名化資產項目及月結趨勢供試算表或分析工具使用。
 - iPhone 分頁介面：手機版分成 `總覽 / 資料 / 月結`，減少長頁捲動。
 
 ## Data Privacy / 資料隱私
@@ -47,6 +48,8 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 3. 選擇月結月份並按 **建立月結**。
 4. 查看月結趨勢與最新月結洞察。
 5. 匯出加密備份，保存到你自己的雲端硬碟或裝置。
+
+若要交給其他軟體做資產分析，可使用 **匯出分析**。分析檔未加密，雖已移除名稱、備註等欄位，仍包含財務金額與持股資訊，只應提供給可信任的工具。
 
 ## User Guide / 使用情境
 

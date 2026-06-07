@@ -10,7 +10,7 @@
     <title>財務簿</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=57" />
+    <link rel="stylesheet" href="./styles.css?v=58" />
   </head>
   <body>
     <div class="app-shell">
@@ -31,6 +31,15 @@
               <path d="m7 9 5-5 5 5" />
             </svg>
             <b>匯出加密</b>
+          </button>
+          <button class="icon-button labeled" id="analysisExportButton" type="button" title="匯出分析用資料">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M4 19V9" />
+              <path d="M10 19V5" />
+              <path d="M16 19v-7" />
+              <path d="M22 19H2" />
+            </svg>
+            <b>匯出分析</b>
           </button>
           <label class="icon-button labeled" title="匯入加密備份">
             <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -331,6 +340,6 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=57" type="module"></script>
+    <script src="./app.js?v=58" type="module"></script>
   </body>
 </html>

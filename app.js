@@ -123,6 +123,7 @@ const els = {
   refreshAllQuotesButton: $("#refreshAllQuotesButton"),
   clearSnapshotsButton: $("#clearSnapshotsButton"),
   exportButton: $("#exportButton"),
+  analysisExportButton: $("#analysisExportButton"),
   importInput: $("#importInput"),
   installButton: $("#installButton"),
   toast: $("#toast"),
@@ -753,6 +754,8 @@ function updateRecordActions() {
   els.snapshotButton.title = hasEntries ? "建立月結" : "請先新增至少一筆資料";
   els.exportButton.disabled = !hasBackupData;
   els.exportButton.title = hasBackupData ? "匯出加密備份" : "目前沒有可匯出的本機資料";
+  els.analysisExportButton.disabled = !hasBackupData;
+  els.analysisExportButton.title = hasBackupData ? "匯出不含名稱與備註的分析資料" : "目前沒有可匯出的本機資料";
   els.refreshAllQuotesButton.disabled = !hasStocks;
   els.refreshAllQuotesButton.title = hasStocks ? "更新所有股票現價" : "目前沒有股票項目";
 }
@@ -2166,6 +2169,114 @@ function buildBackupPayload(exportedAt) {
   };
 }
 
+function breakdownEntries(entries, type) {
+  return entries
+    .filter((entry) => entry.type === type)
+    .reduce((breakdown, entry) => {
+      addBreakdownAmount(breakdown, entry.category, Number(entry.amount) || 0);
+      return breakdown;
+    }, {});
+}
+
+function toAnalysisEntry(entry, index) {
+  const analysisEntry = {
+    recordKey: `${entry.type}-${index + 1}`,
+    type: entry.type,
+    category: entry.category,
+    currency: entry.currency || "TWD",
+    amount: Number(entry.amount) || 0,
+    asOfDate: entry.date || null,
+  };
+
+  if (entry.stock) {
+    analysisEntry.stock = {
+      symbol: entry.stock.symbol || null,
+      shares: Number(entry.stock.shares) || 0,
+      price: Number(entry.stock.price) || 0,
+      exchange: entry.stock.exchange || null,
+      priceIsLive: entry.stock.priceIsLive !== false,
+      priceUpdatedAt: entry.stock.priceUpdatedAt || null,
+    };
+  }
+
+  if (entry.realEstate) {
+    analysisEntry.realEstate = {
+      city: entry.realEstate.city || null,
+      district: entry.realEstate.district || null,
+      buildingAreaPing: Number(entry.realEstate.buildingAreaPing) || 0,
+      parkingCount: Number(entry.realEstate.parkingCount) || 0,
+      valuationMethod: entry.realEstate.valuationMethod || null,
+      confidence: entry.realEstate.confidence || null,
+    };
+  }
+
+  return analysisEntry;
+}
+
+function buildAnalysisPayload(exportedAt) {
+  const entries = state.entries.map(toAnalysisEntry);
+  const totals = getTotals();
+  return {
+    format: "finance-ledger-analysis",
+    schemaVersion: 1,
+    exportedAt,
+    currencyNote: "Amounts are stored in each record's currency; totals currently do not perform FX conversion.",
+    privacy: {
+      encrypted: false,
+      excludedFields: ["name", "note", "street", "entryId", "linkedLiabilityId", "internal timestamps"],
+      warning: "This file contains financial amounts and should be shared only with trusted analysis tools.",
+    },
+    current: {
+      ...totals,
+      assetBreakdown: breakdownEntries(state.entries, "asset"),
+      liabilityBreakdown: breakdownEntries(state.entries, "liability"),
+      limitBreakdown: breakdownEntries(state.entries, "limit"),
+      entries,
+    },
+    monthlySnapshots: state.snapshots
+      .slice()
+      .map(normalizeSnapshot)
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((snapshot) => ({
+        month: snapshot.month,
+        totalAssets: snapshot.totalAssets,
+        totalLiabilities: snapshot.totalLiabilities,
+        totalLimits: snapshot.totalLimits,
+        netWorth: snapshot.netWorth,
+        assetBreakdown: snapshot.assetBreakdown,
+        liabilityBreakdown: snapshot.liabilityBreakdown,
+        limitBreakdown: snapshot.limitBreakdown,
+        stockQuoteTotal: snapshot.stockQuoteTotal,
+        stockQuoteResolved: snapshot.stockQuoteResolved,
+        stockQuoteFailed: snapshot.stockQuoteFailed,
+        stockQuoteFallbackPrevClose: snapshot.stockQuoteFallbackPrevClose,
+      })),
+  };
+}
+
+function exportAnalysisData() {
+  if (!state.entries.length && !state.snapshots.length) {
+    showToast("目前沒有可匯出的本機資料");
+    return;
+  }
+
+  const ok = confirm(
+    [
+      "分析用匯出檔不會加密。",
+      "",
+      "檔案不含項目名稱、備註、街道與資料 ID，但仍包含金額、持股代號、房產區域與月結趨勢。",
+      "只應提供給你信任的軟體或服務。",
+      "",
+      "確定要下載嗎？",
+    ].join("\n")
+  );
+  if (!ok) return;
+
+  const exportedAt = new Date().toISOString();
+  downloadJson(`finance-ledger-analysis-${timestampForFilename(new Date(exportedAt))}.json`, buildAnalysisPayload(exportedAt));
+  showToast("已匯出分析用資料");
+}
+
 function promptBackupPassword(message) {
   const password = prompt(message);
   if (password === null) return null;
@@ -2315,6 +2426,7 @@ function bindEvents() {
       showToast("加密備份匯出失敗");
     }
   });
+  els.analysisExportButton.addEventListener("click", exportAnalysisData);
   els.importInput.addEventListener("change", async () => {
     const file = els.importInput.files?.[0];
     if (!file) return;
