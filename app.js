@@ -699,6 +699,8 @@ function resetForm() {
   delete els.quoteStatus.dataset.priceUpdatedAt;
   delete els.quoteStatus.dataset.exchange;
   delete els.quoteStatus.dataset.priceIsLive;
+  delete els.quoteStatus.dataset.refreshAfter;
+  delete els.quoteStatus.dataset.quoteSymbol;
   els.quoteStatus.textContent = "股票市值會用股數 × 現價自動換算。";
   els.realEstateDistrict.value = "";
   els.realEstateArea.value = "";
@@ -1206,10 +1208,19 @@ async function loadData() {
 }
 
 function normalizeEntry(entry) {
+  const normalized = entry.stock
+    ? {
+        ...entry,
+        stock: {
+          ...entry.stock,
+          refreshAfter: entry.stock.refreshAfter || null,
+        },
+      }
+    : entry;
   if (entry.type === "asset" && entry.category === "現金") {
-    return { ...entry, name: "現金" };
+    return { ...normalized, name: "現金" };
   }
-  return entry;
+  return normalized;
 }
 
 async function handleSubmit(event) {
@@ -1225,6 +1236,7 @@ async function handleSubmit(event) {
         priceUpdatedAt: els.quoteStatus.dataset.priceUpdatedAt || null,
         exchange: els.quoteStatus.dataset.exchange || null,
         priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
+        refreshAfter: els.quoteStatus.dataset.refreshAfter || null,
       }
     : null;
   const appliedRealEstateBuildingAmount = Number(els.applyRealEstateEstimateButton.dataset.amount);
@@ -1314,6 +1326,8 @@ function editEntry(id) {
   els.quoteStatus.dataset.priceUpdatedAt = entry.stock?.priceUpdatedAt || "";
   els.quoteStatus.dataset.exchange = entry.stock?.exchange || "";
   els.quoteStatus.dataset.priceIsLive = entry.stock?.priceIsLive === false ? "false" : "true";
+  els.quoteStatus.dataset.refreshAfter = entry.stock?.refreshAfter || "";
+  els.quoteStatus.dataset.quoteSymbol = entry.stock?.symbol || "";
   els.quoteStatus.textContent = entry.stock?.priceUpdatedAt
     ? `現價更新：${new Date(entry.stock.priceUpdatedAt).toLocaleString("zh-TW")}`
     : "股票市值會用股數 × 現價自動換算。";
@@ -1363,7 +1377,11 @@ async function fetchTwStockQuote(symbol) {
     ) {
       throw new Error("行情服務回傳格式錯誤");
     }
-    return { ...data, price: Number(data.price) };
+    return {
+      ...data,
+      price: Number(data.price),
+      refreshAfter: fallbackQuoteRefreshAfter(data),
+    };
   } catch (error) {
     if (error?.name === "AbortError") {
       throw new Error("行情服務連線逾時");
@@ -1372,6 +1390,43 @@ async function fetchTwStockQuote(symbol) {
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+function taipeiDateParts(date = new Date()) {
+  return Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(date)
+      .map(({ type, value }) => [type, value])
+  );
+}
+
+function clientNextMarketOpen(now = new Date()) {
+  let candidate = new Date(now);
+  for (let offset = 0; offset < 8; offset += 1) {
+    const parts = taipeiDateParts(candidate);
+    const open = new Date(`${parts.year}-${parts.month}-${parts.day}T09:00:00+08:00`);
+    if (["Mon", "Tue", "Wed", "Thu", "Fri"].includes(parts.weekday) && open > now) return open;
+    candidate = new Date(new Date(`${parts.year}-${parts.month}-${parts.day}T12:00:00+08:00`).getTime() + 24 * 60 * 60 * 1000);
+  }
+  return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+}
+
+function fallbackQuoteRefreshAfter(quote, now = new Date()) {
+  return quote.isLive ? new Date(now.getTime() + 60 * 1000).toISOString() : clientNextMarketOpen(now).toISOString();
+}
+
+function canReuseStockQuote(stock, now = Date.now()) {
+  const refreshAfter = Date.parse(stock?.refreshAfter);
+  return Number(stock?.price) > 0 && Number.isFinite(refreshAfter) && now < refreshAfter;
 }
 
 const CORS_PROXIES = [
@@ -1962,6 +2017,16 @@ async function refreshQuote() {
     return;
   }
 
+  const cachedStock = {
+    symbol: els.quoteStatus.dataset.quoteSymbol,
+    price: Number(els.stockPrice.value),
+    refreshAfter: els.quoteStatus.dataset.refreshAfter,
+  };
+  if (cachedStock.symbol === symbol && canReuseStockQuote(cachedStock)) {
+    showToast("股價仍在有效期間內，未送出請求");
+    return;
+  }
+
   els.fetchQuoteButton.disabled = true;
   els.quoteStatus.textContent = "抓取現價中...";
   try {
@@ -1971,6 +2036,8 @@ async function refreshQuote() {
     els.quoteStatus.dataset.priceUpdatedAt = quote.fetchedAt;
     els.quoteStatus.dataset.exchange = quote.exchange;
     els.quoteStatus.dataset.priceIsLive = String(quote.isLive);
+    els.quoteStatus.dataset.refreshAfter = quote.refreshAfter;
+    els.quoteStatus.dataset.quoteSymbol = quote.symbol;
     const priceLabel = quote.isLive ? "現價" : "昨收";
     els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · ${priceLabel} ${formatPrice(quote.price)} · ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
     if (!els.entryName.value.trim()) {
@@ -2034,11 +2101,16 @@ async function refreshAllStockQuotes() {
   els.refreshAllQuotesButton.disabled = true;
   const originalText = els.refreshAllQuotesButton.textContent;
   let updated = 0;
+  let skipped = 0;
   let failed = 0;
   let prevCloseCount = 0;
 
   for (const [index, entry] of stockEntries.entries()) {
     els.refreshAllQuotesButton.textContent = `${index + 1}/${stockEntries.length}`;
+    if (canReuseStockQuote(entry.stock)) {
+      skipped += 1;
+      continue;
+    }
     try {
       const quote = await fetchTwStockQuote(entry.stock.symbol);
       const nextEntry = {
@@ -2052,6 +2124,7 @@ async function refreshAllStockQuotes() {
           priceUpdatedAt: quote.fetchedAt,
           exchange: quote.exchange,
           priceIsLive: quote.isLive,
+          refreshAfter: quote.refreshAfter,
         },
         updatedAt: new Date().toISOString(),
       };
@@ -2067,7 +2140,8 @@ async function refreshAllStockQuotes() {
   els.refreshAllQuotesButton.textContent = originalText;
   await loadData();
   const prevCloseNote = prevCloseCount ? `（${prevCloseCount} 筆為昨收）` : "";
-  showToast(failed ? `已更新 ${updated} 筆${prevCloseNote}，${failed} 筆失敗` : `已更新 ${updated} 筆股價${prevCloseNote}`);
+  const skippedNote = skipped ? `，${skipped} 筆已是最新` : "";
+  showToast(failed ? `已更新 ${updated} 筆${prevCloseNote}${skippedNote}，${failed} 筆失敗` : `已更新 ${updated} 筆股價${prevCloseNote}${skippedNote}`);
 }
 
 function downloadJson(filename, payload) {
@@ -2381,12 +2455,23 @@ function bindEvents() {
     updateLimitHint();
   });
   els.stockShares.addEventListener("input", updateStockMarketValue);
-  els.stockPrice.addEventListener("input", updateStockMarketValue);
+  els.stockPrice.addEventListener("input", () => {
+    delete els.quoteStatus.dataset.refreshAfter;
+    delete els.quoteStatus.dataset.quoteSymbol;
+    updateStockMarketValue();
+  });
   els.entryAmount.addEventListener("input", () => {
     if (isRealEstateEntry()) clearRealEstateEstimate();
   });
   els.stockSymbol.addEventListener("change", () => {
     els.stockSymbol.value = normalizeSymbol(els.stockSymbol.value);
+    if (els.quoteStatus.dataset.quoteSymbol !== els.stockSymbol.value) {
+      delete els.quoteStatus.dataset.priceUpdatedAt;
+      delete els.quoteStatus.dataset.exchange;
+      delete els.quoteStatus.dataset.priceIsLive;
+      delete els.quoteStatus.dataset.refreshAfter;
+      delete els.quoteStatus.dataset.quoteSymbol;
+    }
   });
   els.fetchQuoteButton.addEventListener("click", refreshQuote);
   [els.realEstateCity, els.realEstateDistrict, els.realEstateArea, els.realEstateStreet].forEach((element) => {
