@@ -418,7 +418,7 @@ function getHealthChecks() {
       status: "info",
       title: "股票價格為昨收",
       description: `${prevCloseStocks.length} 筆股票目前是昨收價（盤前或收盤後抓取）。`,
-      actionHint: "盤中（09:00–13:30）按「更新股價」可取得即時價。",
+      actionHint: "交易日盤中（09:00–13:30）可更新即時價；13:40 後可再更新一次當日收盤價。",
     });
   }
 
