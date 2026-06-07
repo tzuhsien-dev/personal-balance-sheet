@@ -1434,9 +1434,21 @@ function fallbackQuoteRefreshAfter(quote, now = new Date()) {
   return clientNextMarketOpen(now).toISOString();
 }
 
+function isMarketUpdateWindow(now = new Date()) {
+  const parts = taipeiDateParts(now);
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  return ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(parts.weekday) && minutes >= 9 * 60 && minutes < 13 * 60 + 40;
+}
+
 function canReuseStockQuote(stock, now = Date.now()) {
+  if (!(Number(stock?.price) > 0)) return false;
   const refreshAfter = Date.parse(stock?.refreshAfter);
-  return Number(stock?.price) > 0 && Number.isFinite(refreshAfter) && now < refreshAfter;
+  if (Number.isFinite(refreshAfter) && now < refreshAfter) return true;
+
+  const parts = taipeiDateParts(new Date(now));
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(parts.weekday);
+  return stock.priceIsLive === false && (!isWeekday || minutes < 9 * 60 || (minutes >= 13 * 60 + 30 && minutes < 13 * 60 + 40));
 }
 
 const CORS_PROXIES = [
@@ -2030,6 +2042,7 @@ async function refreshQuote() {
   const cachedStock = {
     symbol: els.quoteStatus.dataset.quoteSymbol,
     price: Number(els.stockPrice.value),
+    priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
     refreshAfter: els.quoteStatus.dataset.refreshAfter,
   };
   if (cachedStock.symbol === symbol && canReuseStockQuote(cachedStock)) {
@@ -2057,6 +2070,10 @@ async function refreshQuote() {
     showToast("已更新現價");
   } catch (error) {
     const message = error?.message || "行情服務暫時無法使用";
+    if (!isMarketUpdateWindow()) {
+      els.quoteStatus.dataset.refreshAfter = clientNextMarketOpen().toISOString();
+      els.quoteStatus.dataset.quoteSymbol = symbol;
+    }
     els.quoteStatus.textContent = `抓價失敗：${message}。你仍可手動輸入價格。`;
     showToast(message);
   } finally {
@@ -2148,6 +2165,18 @@ async function refreshAllStockQuotes() {
       const symbols = failureGroups.get(reason) || [];
       symbols.push(entry.stock.symbol);
       failureGroups.set(reason, symbols);
+      if (!isMarketUpdateWindow()) {
+        await putItem(
+          STORE_ENTRIES,
+          normalizeEntry({
+            ...entry,
+            stock: {
+              ...entry.stock,
+              refreshAfter: clientNextMarketOpen().toISOString(),
+            },
+          })
+        );
+      }
     }
   }
 
