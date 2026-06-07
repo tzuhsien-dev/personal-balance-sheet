@@ -35,6 +35,7 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 
 - 資料儲存在目前瀏覽器的 IndexedDB。
 - GitHub Pages 只提供靜態檔案，沒有後端、沒有登入、沒有資料庫。
+- 台股即時行情透過專屬 Cloudflare Worker 轉送公開的證交所行情；Worker 不接收或儲存持股、金額或其他財務資料。
 - 加密備份使用 `PBKDF2-SHA256 + AES-GCM` 在瀏覽器本機完成。
 - 密碼不會存進 localStorage 或備份檔；忘記密碼就無法還原加密備份。
 - 不要把備份檔 commit 到 repo，即使是加密檔也建議放在 iCloud Drive、Google Drive、Dropbox 等個人空間。
@@ -89,6 +90,19 @@ GitHub Pages settings:
 - Folder: `/root`
 
 部署後，用 iPhone Safari 開啟 GitHub Pages 網址，選擇 **Add to Home Screen / 加入主畫面**，就可以像 app 一樣使用。
+
+### Stock Quote Worker
+
+股價查詢需要部署 `worker/worker.js` 到 Cloudflare Worker：
+
+1. 在 Cloudflare Dashboard 建立 Worker。
+2. 用 `worker/worker.js` 完整取代預設的 Hello World 程式。
+3. 按 **部署**，確認 `?symbol=2330` 回傳台積電行情 JSON。
+4. 若 Worker 網址不同，修改 `app.js` 的 `STOCK_QUOTE_API_URL`。
+
+目前前端設定的 Worker 網址是：
+
+`https://green-base-8077.keterwang1206.workers.dev`
 
 ## Tech Stack
 

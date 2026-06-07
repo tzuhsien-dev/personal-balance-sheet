@@ -15,6 +15,7 @@ const BACKUP_KDF_ITERATIONS = 210000;
 const BACKUP_OVERDUE_DAYS = 30;
 const ENTRY_STALE_DAYS = 30;
 const STOCK_QUOTE_STALE_DAYS = 7;
+const STOCK_QUOTE_API_URL = "https://green-base-8077.keterwang1206.workers.dev";
 const REAL_ESTATE_STREET_SAMPLE_MIN = 5;
 const REAL_ESTATE_COMPARABLE_SAMPLE_MIN = 5;
 const REAL_ESTATE_SEASON_COUNT = 4;
@@ -1338,42 +1339,36 @@ function normalizeSymbol(value) {
 async function fetchTwStockQuote(symbol) {
   const cleanSymbol = normalizeSymbol(symbol);
   if (!cleanSymbol) throw new Error("Missing symbol");
-  const exchanges = [
-    { id: "tse", label: "上市" },
-    { id: "otc", label: "上櫃" },
-  ];
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 12000);
 
-  for (const exchange of exchanges) {
-    const sourceUrl = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exchange.id}_${encodeURIComponent(cleanSymbol)}.tw&json=1&delay=0&_=${Date.now()}`;
-    try {
-      const data = await fetchQuoteJson(sourceUrl);
-      const quote = data?.msgArray?.[0];
-      if (!quote) continue;
-      const livePrice = pickQuotePrice(quote.z) ?? pickQuotePrice(quote.pz);
-      const prevClose = pickQuotePrice(quote.y);
-      const price = livePrice ?? prevClose;
-      if (price > 0) {
-        return {
-          symbol: cleanSymbol,
-          name: quote.n || cleanSymbol,
-          price,
-          exchange: exchange.label,
-          fetchedAt: new Date().toISOString(),
-          isLive: livePrice != null,
-        };
-      }
-    } catch {
-      continue;
+  try {
+    const url = new URL(STOCK_QUOTE_API_URL);
+    url.searchParams.set("symbol", cleanSymbol);
+    const response = await fetch(url, { cache: "no-store", signal: controller.signal });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.error || "行情服務暫時無法使用");
     }
+    if (
+      data?.symbol !== cleanSymbol ||
+      typeof data?.name !== "string" ||
+      !(Number(data?.price) > 0) ||
+      typeof data?.exchange !== "string" ||
+      typeof data?.fetchedAt !== "string" ||
+      typeof data?.isLive !== "boolean"
+    ) {
+      throw new Error("行情服務回傳格式錯誤");
+    }
+    return { ...data, price: Number(data.price) };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("行情服務連線逾時");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
-
-  throw new Error("Quote unavailable");
-}
-
-function pickQuotePrice(value) {
-  if (value == null || value === "-") return null;
-  const num = Number(value);
-  return num > 0 ? num : null;
 }
 
 const CORS_PROXIES = [
@@ -1384,29 +1379,6 @@ const CORS_PROXIES = [
 
 function buildProxyAttempts(sourceUrl) {
   return CORS_PROXIES.map((proxy) => ({ url: proxy.build(sourceUrl), source: proxy.source }));
-}
-
-async function fetchQuoteJson(sourceUrl) {
-  const attempts = buildProxyAttempts(sourceUrl);
-
-  for (const attempt of attempts) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-      const response = await fetch(attempt.url, { cache: "no-store", signal: controller.signal });
-      window.clearTimeout(timeoutId);
-      if (!response.ok) continue;
-      const data = await response.json();
-      if (data?.rtcode === "0000" && Array.isArray(data.msgArray)) {
-        data.source = attempt.source;
-        return data;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  throw new Error("Quote unavailable");
 }
 
 async function fetchJsonWithProxyFallback(sourceUrl, validator) {
@@ -2003,9 +1975,10 @@ async function refreshQuote() {
     }
     updateStockMarketValue();
     showToast("已更新現價");
-  } catch {
-    els.quoteStatus.textContent = "抓不到現價，請確認代號或手動輸入價格。";
-    showToast("現價抓取失敗");
+  } catch (error) {
+    const message = error?.message || "行情服務暫時無法使用";
+    els.quoteStatus.textContent = `抓價失敗：${message}。你仍可手動輸入價格。`;
+    showToast(message);
   } finally {
     els.fetchQuoteButton.disabled = false;
   }
