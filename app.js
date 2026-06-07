@@ -1420,15 +1420,15 @@ function clientNextMarketOpen(now = new Date()) {
   return new Date(now.getTime() + 24 * 60 * 60 * 1000);
 }
 
-function currentMarketClose(now = new Date()) {
+function currentClosingPriceReadyTime(now = new Date()) {
   const parts = taipeiDateParts(now);
-  return new Date(`${parts.year}-${parts.month}-${parts.day}T13:30:00+08:00`);
+  return new Date(`${parts.year}-${parts.month}-${parts.day}T13:40:00+08:00`);
 }
 
 function fallbackQuoteRefreshAfter(quote, now = new Date()) {
-  const close = currentMarketClose(now);
-  if (quote.isLive && now < close) {
-    return new Date(Math.min(now.getTime() + 60 * 1000, close.getTime())).toISOString();
+  const closingPriceReady = currentClosingPriceReadyTime(now);
+  if (quote.isLive && now < closingPriceReady) {
+    return new Date(Math.min(now.getTime() + 60 * 1000, closingPriceReady.getTime())).toISOString();
   }
   return clientNextMarketOpen(now).toISOString();
 }
