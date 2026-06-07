@@ -1208,6 +1208,8 @@ textarea {
   transition: 180ms ease;
   box-shadow: var(--shadow);
   font-weight: 800;
+  text-align: center;
+  white-space: pre-line;
 }
 
 .toast.show {

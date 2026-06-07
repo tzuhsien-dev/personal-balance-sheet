@@ -224,10 +224,11 @@ function uid(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function showToast(message) {
+function showToast(message, duration = 2200) {
+  window.clearTimeout(showToast.timeoutId);
   els.toast.textContent = message;
   els.toast.classList.add("show");
-  window.setTimeout(() => els.toast.classList.remove("show"), 2200);
+  showToast.timeoutId = window.setTimeout(() => els.toast.classList.remove("show"), duration);
 }
 
 function getStoredGuideState() {
@@ -2113,6 +2114,7 @@ async function refreshAllStockQuotes() {
   let skipped = 0;
   let failed = 0;
   let prevCloseCount = 0;
+  const failureGroups = new Map();
 
   for (const [index, entry] of stockEntries.entries()) {
     els.refreshAllQuotesButton.textContent = `${index + 1}/${stockEntries.length}`;
@@ -2140,8 +2142,12 @@ async function refreshAllStockQuotes() {
       await putItem(STORE_ENTRIES, normalizeEntry(nextEntry));
       updated += 1;
       if (!quote.isLive) prevCloseCount += 1;
-    } catch {
+    } catch (error) {
       failed += 1;
+      const reason = error?.message || "行情服務暫時無法使用";
+      const symbols = failureGroups.get(reason) || [];
+      symbols.push(entry.stock.symbol);
+      failureGroups.set(reason, symbols);
     }
   }
 
@@ -2150,7 +2156,14 @@ async function refreshAllStockQuotes() {
   await loadData();
   const prevCloseNote = prevCloseCount ? `（${prevCloseCount} 筆為昨收）` : "";
   const skippedNote = skipped ? `，${skipped} 筆已是最新` : "";
-  showToast(failed ? `已更新 ${updated} 筆${prevCloseNote}${skippedNote}，${failed} 筆失敗` : `已更新 ${updated} 筆股價${prevCloseNote}${skippedNote}`);
+  if (failed) {
+    const failureSummary = [...failureGroups.entries()]
+      .map(([reason, symbols]) => `${symbols.join("、")}：${reason}`)
+      .join("\n");
+    showToast(`已更新 ${updated} 筆${prevCloseNote}${skippedNote}，${failed} 筆失敗\n${failureSummary}`, 7000);
+  } else {
+    showToast(`已更新 ${updated} 筆股價${prevCloseNote}${skippedNote}`);
+  }
 }
 
 function downloadJson(filename, payload) {
