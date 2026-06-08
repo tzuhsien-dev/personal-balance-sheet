@@ -26,7 +26,7 @@
 - `index.html`：`styles.css?v=NN`、`app.js?v=NN`
 - `sw.js`：`CACHE_NAME = "finance-ledger-vNN"` 與 `ASSETS` 內的 `?v=NN`
 
-一鍵處理：`./bump-version.sh`（遞增上述全部 4 處）。
+一鍵處理：**commit / push 前先跑 `./bump-version.sh`**（遞增上述全部 4 處），再 commit。因為 push 到 `main` 即部署，漏 bump 的那次 deploy 不會被 PWA 抓到。
 
 PWA 自動更新機制：`app.js` 的 `registerServiceWorker()` 用 `updateViaCache: "none"` 抓 `sw.js`，並監聽 `controllerchange` 自動 reload。但若 `sw.js` 內容沒變（版本沒 bump），瀏覽器判定無更新 → 不會觸發更新。所以 bump 是更新生效的觸發點。
 
