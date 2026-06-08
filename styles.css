@@ -350,6 +350,28 @@ h3 {
   color: var(--muted);
 }
 
+.cloud-sync-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  border-left: 5px solid var(--line);
+}
+
+.cloud-sync-panel.configured {
+  border-left-color: var(--asset);
+}
+
+.cloud-sync-form {
+  display: grid;
+  gap: 12px;
+}
+
+.cloud-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .guide-summary {
   display: flex;
   align-items: flex-start;
@@ -1322,6 +1344,11 @@ textarea {
 
   .backup-actions {
     justify-items: stretch;
+  }
+
+  .cloud-sync-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .records-panel .panel-heading {

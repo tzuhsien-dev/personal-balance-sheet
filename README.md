@@ -39,6 +39,8 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 - 資料儲存在目前瀏覽器的 IndexedDB。
 - GitHub Pages 只提供靜態檔案，沒有後端、沒有登入、沒有資料庫。
 - 台股即時行情透過專屬 Cloudflare Worker 轉送公開的證交所行情；Worker 不接收或儲存持股、金額或其他財務資料。
+- Google Drive 同步預設關閉；公開 GitHub Pages 不內建私密 token。登入 Google 後，資料會同步到使用者自己的 Drive app 專用空間。
+- 雲端同步會先在瀏覽器本機加密完整備份，再上傳到 Google Drive `appDataFolder`；Google Drive 只保存密文與少量同步時間/筆數 metadata。
 - 加密備份使用 `PBKDF2-SHA256 + AES-GCM` 在瀏覽器本機完成。
 - 密碼不會存進 localStorage 或備份檔；忘記密碼就無法還原加密備份。
 - 不要把備份檔 commit 到 repo，即使是加密檔也建議放在 iCloud Drive、Google Drive、Dropbox 等個人空間。
@@ -109,6 +111,23 @@ GitHub Pages settings:
 目前前端設定的 Worker 網址是：
 
 `https://green-base-8077.keterwang1206.workers.dev`
+
+### Google Drive Sync
+
+Google Drive 同步是選用功能。GitHub Pages 可以公開；每個使用者登入自己的 Google 帳號後，資料會存到自己的 Drive `appDataFolder`。
+
+1. 到 Google Cloud Console 建立或選擇一個專案。
+2. 啟用 **Google Drive API**。
+3. 在 OAuth consent screen 設定 app 名稱與測試/正式狀態。
+4. 建立 **OAuth 2.0 Client ID**，Application type 選 **Web application**。
+5. 在 Authorized JavaScript origins 加入你的 GitHub Pages origin，例如 `https://你的帳號.github.io`。
+6. 將 Client ID 填到 `index.html`：
+   ```html
+   <meta name="google-client-id" content="你的 Google OAuth Client ID" />
+   ```
+7. 部署 GitHub Pages 後，在 app 的 **Google Drive 同步** 區塊按 **登入 Google**，再按 **上傳 Google Drive** 或 **下載 Google Drive**。
+
+同步使用 `https://www.googleapis.com/auth/drive.appdata` scope，只讀寫這個 app 在使用者 Google Drive 裡的專用資料。路人甲即使打開公開網站，也只能同步到他自己的 Google Drive，不會碰到你的資料。
 
 ## Tech Stack
 

@@ -8,7 +8,10 @@ const MOBILE_TAB_STORAGE_KEY = "finance-ledger-mobile-tab";
 const BACKUP_STORAGE_KEY = "finance-ledger-last-backup-at";
 const BACKUP_NEEDED_STORAGE_KEY = "finance-ledger-backup-needed";
 const IMPORTED_BACKUP_STORAGE_KEY = "finance-ledger-last-imported-exported-at";
+const GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY = "finance-ledger-google-drive-last-uploaded-at";
+const GOOGLE_DRIVE_LAST_DOWNLOAD_STORAGE_KEY = "finance-ledger-google-drive-last-downloaded-at";
 const BACKUP_SCHEMA_VERSION = 2;
+const GOOGLE_DRIVE_SYNC_SCHEMA_VERSION = 1;
 const BACKUP_KDF = "PBKDF2-SHA256";
 const BACKUP_CIPHER = "AES-GCM";
 const BACKUP_KDF_ITERATIONS = 210000;
@@ -16,6 +19,10 @@ const BACKUP_OVERDUE_DAYS = 30;
 const ENTRY_STALE_DAYS = 30;
 const STOCK_QUOTE_STALE_DAYS = 7;
 const STOCK_QUOTE_API_URL = "https://green-base-8077.keterwang1206.workers.dev";
+const GOOGLE_CLIENT_ID = document.querySelector('meta[name="google-client-id"]')?.content.trim() || "";
+const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+const GOOGLE_DRIVE_SYNC_FILE_NAME = "finance-ledger-sync.encrypted.json";
+const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const REAL_ESTATE_STREET_SAMPLE_MIN = 5;
 const REAL_ESTATE_COMPARABLE_SAMPLE_MIN = 5;
 const REAL_ESTATE_SEASON_COUNT = 4;
@@ -59,6 +66,8 @@ const state = {
   showAllEntries: false,
   showAllSnapshots: false,
   deferredInstallPrompt: null,
+  googleAccessToken: null,
+  googleTokenClient: null,
 };
 
 const els = {
@@ -111,6 +120,12 @@ const els = {
   backupStatusText: $("#backupStatusText"),
   backupImportText: $("#backupImportText"),
   backupBadge: $("#backupBadge"),
+  googleDriveSyncPanel: $("#googleDriveSyncPanel"),
+  googleDriveSyncStatusText: $("#googleDriveSyncStatusText"),
+  googleDriveSignInButton: $("#googleDriveSignInButton"),
+  uploadGoogleDriveButton: $("#uploadGoogleDriveButton"),
+  downloadGoogleDriveButton: $("#downloadGoogleDriveButton"),
+  googleDriveSignOutButton: $("#googleDriveSignOutButton"),
   clearLocalDataButton: $("#clearLocalDataButton"),
   allocationList: $("#allocationList"),
   limitDisclosure: $("#limitDisclosure"),
@@ -324,6 +339,37 @@ function hasUnbackedLocalChanges() {
   if (!localUpdatedAt) return false;
   const lastBackupAt = localStorage.getItem(BACKUP_STORAGE_KEY);
   return timestampValue(lastBackupAt) < timestampValue(localUpdatedAt);
+}
+
+function hasGoogleClientId() {
+  return Boolean(GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.includes("YOUR_GOOGLE_CLIENT_ID"));
+}
+
+function renderGoogleDriveSyncStatus() {
+  const configured = hasGoogleClientId();
+  const signedIn = Boolean(state.googleAccessToken);
+  const lastUploadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY);
+  const lastDownloadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_DOWNLOAD_STORAGE_KEY);
+  els.googleDriveSignInButton.disabled = !configured;
+  els.uploadGoogleDriveButton.disabled = !configured || !signedIn || (!state.entries.length && !state.snapshots.length);
+  els.downloadGoogleDriveButton.disabled = !configured || !signedIn;
+  els.googleDriveSignOutButton.disabled = !signedIn;
+  els.googleDriveSyncPanel.classList.toggle("configured", configured && signedIn);
+  els.googleDriveSyncPanel.classList.toggle("idle", !signedIn);
+
+  if (!configured) {
+    els.googleDriveSyncStatusText.textContent = "尚未設定 Google Client ID；設定後親友可登入自己的 Google Drive 同步。";
+    return;
+  }
+  if (!signedIn) {
+    els.googleDriveSyncStatusText.textContent = "本機模式。登入 Google 後，同步資料會存到你自己的 Drive app 專用空間。";
+    return;
+  }
+
+  const details = ["已登入 Google Drive"];
+  if (lastUploadedAt) details.push(`上次上傳：${formatDateTime(lastUploadedAt)}`);
+  if (lastDownloadedAt) details.push(`上次下載：${formatDateTime(lastDownloadedAt)}`);
+  els.googleDriveSyncStatusText.textContent = details.join("；");
 }
 
 function renderBackupStatus() {
@@ -1185,6 +1231,7 @@ function render() {
   renderAllocation();
   renderSnapshots();
   renderBackupStatus();
+  renderGoogleDriveSyncStatus();
 }
 
 function escapeHtml(value) {
@@ -2294,6 +2341,318 @@ function buildBackupPayload(exportedAt) {
   };
 }
 
+function buildGoogleDriveSyncPayload(exportedAt, encryptedBackup) {
+  return {
+    app: "finance-ledger-google-drive-sync",
+    schemaVersion: GOOGLE_DRIVE_SYNC_SCHEMA_VERSION,
+    uploadedAt: new Date().toISOString(),
+    exportedAt,
+    localUpdatedAt: getLocalUpdatedAt(),
+    entryCount: state.entries.length,
+    snapshotCount: state.snapshots.length,
+    encryptedBackup,
+  };
+}
+
+function validateGoogleDriveSyncPayload(payload) {
+  return (
+    payload?.app === "finance-ledger-google-drive-sync" &&
+    payload?.schemaVersion === GOOGLE_DRIVE_SYNC_SCHEMA_VERSION &&
+    payload?.encryptedBackup?.app === "finance-ledger" &&
+    payload?.encryptedBackup?.encrypted === true
+  );
+}
+
+function ensureGoogleIdentityServices() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existingScript = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`);
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Google 登入服務載入失敗")), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = GOOGLE_IDENTITY_SCRIPT_URL;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Google 登入服務載入失敗"));
+    document.head.append(script);
+  });
+}
+
+async function requestGoogleDriveAccess() {
+  if (!hasGoogleClientId()) {
+    showToast("尚未設定 Google Client ID");
+    return false;
+  }
+  await ensureGoogleIdentityServices();
+  return new Promise((resolve, reject) => {
+    if (!state.googleTokenClient) {
+      state.googleTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: GOOGLE_DRIVE_SCOPE,
+        callback: () => {},
+      });
+    }
+    state.googleTokenClient.callback = (response) => {
+      if (response?.error) {
+        reject(new Error("Google 登入授權失敗"));
+        return;
+      }
+      state.googleAccessToken = response.access_token;
+      renderGoogleDriveSyncStatus();
+      resolve(true);
+    };
+    state.googleTokenClient.requestAccessToken({ prompt: state.googleAccessToken ? "" : "consent" });
+  });
+}
+
+function signOutGoogleDrive() {
+  if (state.googleAccessToken && window.google?.accounts?.oauth2?.revoke) {
+    google.accounts.oauth2.revoke(state.googleAccessToken, () => {});
+  }
+  state.googleAccessToken = null;
+  renderGoogleDriveSyncStatus();
+  showToast("已登出 Google");
+}
+
+async function ensureGoogleDriveAccess() {
+  if (state.googleAccessToken) return true;
+  return requestGoogleDriveAccess();
+}
+
+async function googleDriveRequest(url, options = {}) {
+  if (!state.googleAccessToken) throw new Error("請先登入 Google");
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      Authorization: `Bearer ${state.googleAccessToken}`,
+    },
+  });
+  if (response.status === 401) {
+    state.googleAccessToken = null;
+    renderGoogleDriveSyncStatus();
+    throw new Error("Google 登入已過期，請重新登入");
+  }
+  return response;
+}
+
+function parseGoogleDriveError(payload, fallback) {
+  return payload?.error?.message || fallback;
+}
+
+async function findGoogleDriveSyncFile() {
+  const params = new URLSearchParams({
+    spaces: "appDataFolder",
+    q: `name = '${GOOGLE_DRIVE_SYNC_FILE_NAME.replaceAll("'", "\\'")}' and trashed = false`,
+    fields: "files(id,name,modifiedTime)",
+    pageSize: "1",
+  });
+  const response = await googleDriveRequest(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(parseGoogleDriveError(payload, "Google Drive 同步檔查詢失敗"));
+  return payload?.files?.[0] || null;
+}
+
+async function readGoogleDriveSyncPayload(fileId) {
+  const response = await googleDriveRequest(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(parseGoogleDriveError(payload, "Google Drive 同步檔讀取失敗"));
+  if (!validateGoogleDriveSyncPayload(payload)) throw new Error("Google Drive 同步資料格式不支援");
+  return payload;
+}
+
+async function fetchGoogleDriveSyncPayload() {
+  const file = await findGoogleDriveSyncFile();
+  if (!file) return null;
+  return readGoogleDriveSyncPayload(file.id);
+}
+
+function buildGoogleDriveMultipartBody(metadata, payload) {
+  const boundary = `finance-ledger-${crypto.randomUUID()}`;
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify(payload),
+    `--${boundary}--`,
+  ].join("\r\n");
+  return { boundary, body };
+}
+
+async function putGoogleDriveSyncPayload(payload) {
+  const existingFile = await findGoogleDriveSyncFile();
+  const metadata = existingFile ? { name: GOOGLE_DRIVE_SYNC_FILE_NAME } : { name: GOOGLE_DRIVE_SYNC_FILE_NAME, parents: ["appDataFolder"] };
+  const { boundary, body } = buildGoogleDriveMultipartBody(metadata, payload);
+  const url = existingFile
+    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(existingFile.id)}?uploadType=multipart`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+  const response = await googleDriveRequest(url, {
+    method: existingFile ? "PATCH" : "POST",
+    headers: {
+      "Content-Type": `multipart/related; boundary=${boundary}`,
+    },
+    body,
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(parseGoogleDriveError(result, "Google Drive 同步上傳失敗"));
+  return result;
+}
+
+function promptGoogleDriveSyncPassword(message) {
+  return promptBackupPassword(`${message}\n\n這個密碼只在本機用來加密/解密，系統不會保存。`);
+}
+
+async function uploadGoogleDriveData() {
+  let hasAccess;
+  try {
+    hasAccess = await ensureGoogleDriveAccess();
+  } catch (error) {
+    showToast(error?.message || "Google 登入失敗", 5000);
+    return;
+  }
+  if (!hasAccess) return;
+  if (!state.entries.length && !state.snapshots.length) {
+    showToast("目前沒有可上傳的本機資料");
+    return;
+  }
+
+  els.uploadGoogleDriveButton.disabled = true;
+  const originalText = els.uploadGoogleDriveButton.textContent;
+  els.uploadGoogleDriveButton.textContent = "檢查中...";
+  try {
+    const remote = await fetchGoogleDriveSyncPayload();
+    const localUpdatedAt = getLocalUpdatedAt();
+    if (remote && timestampValue(remote.localUpdatedAt || remote.exportedAt) > timestampValue(localUpdatedAt)) {
+      const ok = confirm(
+        [
+          "雲端資料看起來比本機新。",
+          "",
+          `雲端更新：${formatDateTime(remote.localUpdatedAt || remote.exportedAt)}`,
+          `本機更新：${formatDateTime(localUpdatedAt)}`,
+          "",
+          "繼續上傳會覆蓋雲端資料。確定要繼續嗎？",
+        ].join("\n")
+      );
+      if (!ok) return;
+    }
+
+    const password = promptGoogleDriveSyncPassword("請輸入 Google Drive 同步加密密碼。");
+    if (password === null) return;
+    const confirmedPassword = promptGoogleDriveSyncPassword("請再輸入一次 Google Drive 同步加密密碼。");
+    if (confirmedPassword === null) return;
+    if (password !== confirmedPassword) {
+      showToast("兩次密碼不一致，已取消上傳");
+      return;
+    }
+    els.uploadGoogleDriveButton.textContent = "加密中...";
+    const exportedAt = new Date().toISOString();
+    const encryptedBackup = await encryptBackupPayload(buildBackupPayload(exportedAt), password);
+    const syncPayload = buildGoogleDriveSyncPayload(exportedAt, encryptedBackup);
+    els.uploadGoogleDriveButton.textContent = "上傳中...";
+    await putGoogleDriveSyncPayload(syncPayload);
+    localStorage.setItem(GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY, syncPayload.uploadedAt);
+    renderGoogleDriveSyncStatus();
+    showToast("已上傳 Google Drive");
+  } catch (error) {
+    showToast(error?.message || "Google Drive 同步上傳失敗", 5000);
+  } finally {
+    els.uploadGoogleDriveButton.disabled = false;
+    els.uploadGoogleDriveButton.textContent = originalText;
+    renderGoogleDriveSyncStatus();
+  }
+}
+
+async function downloadGoogleDriveData() {
+  let hasAccess;
+  try {
+    hasAccess = await ensureGoogleDriveAccess();
+  } catch (error) {
+    showToast(error?.message || "Google 登入失敗", 5000);
+    return;
+  }
+  if (!hasAccess) return;
+
+  els.downloadGoogleDriveButton.disabled = true;
+  const originalText = els.downloadGoogleDriveButton.textContent;
+  els.downloadGoogleDriveButton.textContent = "下載中...";
+  try {
+    const remote = await fetchGoogleDriveSyncPayload();
+    if (!remote) {
+      showToast("Google Drive 尚無同步資料");
+      return;
+    }
+
+    const password = promptGoogleDriveSyncPassword("請輸入 Google Drive 同步加密密碼。");
+    if (password === null) return;
+
+    let data;
+    try {
+      els.downloadGoogleDriveButton.textContent = "解密中...";
+      data = await decryptBackupFile(remote.encryptedBackup, password);
+    } catch {
+      showToast("解密失敗，請確認同步密碼");
+      return;
+    }
+
+    if (!Array.isArray(data.entries) || !Array.isArray(data.snapshots)) {
+      throw new Error("Google Drive 同步資料格式不正確");
+    }
+
+    const ok = confirm(
+      [
+        "下載 Google Drive 同步會覆蓋目前這台裝置的所有本機資料。",
+        "",
+        "目前本機資料",
+        `項目數：${state.entries.length}`,
+        `月結數：${state.snapshots.length}`,
+        `最後變更：${formatDateTime(getLocalUpdatedAt())}`,
+        "",
+        "雲端資料",
+        `上傳時間：${formatDateTime(remote.uploadedAt)}`,
+        `匯出時間：${formatDateTime(remote.exportedAt)}`,
+        `項目數：${data.entries.length}`,
+        `月結數：${data.snapshots.length}`,
+        "",
+        "確定要繼續下載嗎？",
+      ].join("\n")
+    );
+    if (!ok) return;
+
+    await clearStore(STORE_ENTRIES);
+    await clearStore(STORE_SNAPSHOTS);
+    for (const entry of data.entries) await putItem(STORE_ENTRIES, normalizeEntry(entry));
+    for (const snapshot of data.snapshots) await putItem(STORE_SNAPSHOTS, normalizeSnapshot(snapshot));
+    const exportedAt = remote.exportedAt || data.exportedAt || null;
+    if (exportedAt) {
+      localStorage.setItem(IMPORTED_BACKUP_STORAGE_KEY, exportedAt);
+    }
+    localStorage.setItem(GOOGLE_DRIVE_LAST_DOWNLOAD_STORAGE_KEY, new Date().toISOString());
+    localStorage.setItem(BACKUP_NEEDED_STORAGE_KEY, "true");
+    await loadData();
+    showToast("已下載 Google Drive 同步資料");
+  } catch (error) {
+    showToast(error?.message || "Google Drive 同步下載失敗", 5000);
+  } finally {
+    els.downloadGoogleDriveButton.disabled = false;
+    els.downloadGoogleDriveButton.textContent = originalText;
+    renderGoogleDriveSyncStatus();
+  }
+}
+
 function breakdownEntries(entries, type) {
   return entries
     .filter((entry) => entry.type === type)
@@ -2546,6 +2905,17 @@ function bindEvents() {
     setGuideOpen(els.guideBody.hidden);
   });
   els.clearLocalDataButton.addEventListener("click", clearLocalData);
+  els.googleDriveSignInButton.addEventListener("click", async () => {
+    try {
+      const signedIn = await requestGoogleDriveAccess();
+      if (signedIn) showToast("已登入 Google");
+    } catch (error) {
+      showToast(error?.message || "Google 登入失敗", 5000);
+    }
+  });
+  els.googleDriveSignOutButton.addEventListener("click", signOutGoogleDrive);
+  els.uploadGoogleDriveButton.addEventListener("click", uploadGoogleDriveData);
+  els.downloadGoogleDriveButton.addEventListener("click", downloadGoogleDriveData);
   els.snapshotButton.addEventListener("click", createSnapshot);
   els.refreshAllQuotesButton.addEventListener("click", refreshAllStockQuotes);
   els.clearSnapshotsButton.addEventListener("click", async () => {
@@ -2643,6 +3013,7 @@ setupRealEstateOptions();
 updateCategoryOptions();
 resetForm();
 resetSnapshotMonth();
+renderGoogleDriveSyncStatus();
 if (getStoredGuideState() !== null) {
   setGuideOpen(getStoredGuideState() === "true", false);
 }
