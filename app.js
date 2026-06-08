@@ -2987,8 +2987,30 @@ function bindEvents() {
 }
 
 async function registerServiceWorker() {
-  if ("serviceWorker" in navigator) {
-    await navigator.serviceWorker.register("./sw.js");
+  if (!("serviceWorker" in navigator)) return;
+  // 頁面載入時已有 controller → 代表這次是「更新」而非首次安裝
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  try {
+    const registration = await navigator.serviceWorker.register("./sw.js", {
+      updateViaCache: "none", // 關鍵：每次都向網路抓 sw.js，繞過 iOS HTTP 快取
+    });
+
+    // 新 SW 接管後自動重新載入一次，取得最新畫面（自動靜默重載）
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+
+    // 啟動時 + 每次從背景回前景時主動檢查更新（iOS PWA 不會自動檢查）
+    const checkForUpdate = () => registration.update().catch(() => {});
+    checkForUpdate();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkForUpdate();
+    });
+  } catch (_) {
+    // 註冊失敗不影響本機功能，靜默忽略
   }
 }
 
