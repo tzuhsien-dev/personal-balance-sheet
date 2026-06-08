@@ -1233,6 +1233,40 @@ function normalizeSnapshot(snapshot) {
   };
 }
 
+// 把已渲染好的畫面快照存進 localStorage（同步），下次開頁可在 IndexedDB 讀取完成前先「瞬間」畫上去，
+// 避免第一眼閃出 NT$0 / 空白。entryList、snapshotList 用事件委派，還原 innerHTML 後按鈕照常運作。
+const PAINT_CACHE_KEY = "finance-ledger-paint-cache";
+const PAINT_TEXT_KEYS = ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated"];
+const PAINT_HTML_KEYS = ["healthList", "entryList", "allocationList", "snapshotList"];
+
+function savePaintCache() {
+  try {
+    const snapshot = { mobileTab: state.mobileTab };
+    for (const key of PAINT_TEXT_KEYS) snapshot[key] = { t: els[key]?.textContent ?? "" };
+    for (const key of PAINT_HTML_KEYS) snapshot[key] = { h: els[key]?.innerHTML ?? "" };
+    localStorage.setItem(PAINT_CACHE_KEY, JSON.stringify(snapshot));
+  } catch (_) {
+    // localStorage 不可用或超量時忽略，純屬載入體驗最佳化
+  }
+}
+
+function restorePaintCache() {
+  try {
+    const raw = localStorage.getItem(PAINT_CACHE_KEY);
+    if (!raw) return;
+    const snapshot = JSON.parse(raw);
+    for (const key of PAINT_TEXT_KEYS) {
+      if (els[key] && typeof snapshot[key]?.t === "string") els[key].textContent = snapshot[key].t;
+    }
+    for (const key of PAINT_HTML_KEYS) {
+      if (els[key] && typeof snapshot[key]?.h === "string") els[key].innerHTML = snapshot[key].h;
+    }
+    if (snapshot.mobileTab) setMobileTab(snapshot.mobileTab, false);
+  } catch (_) {
+    // 快照損毀時忽略，loadData 會以真實資料重畫
+  }
+}
+
 function render() {
   renderSummary();
   renderHealthChecks();
@@ -1241,6 +1275,7 @@ function render() {
   renderSnapshots();
   renderBackupStatus();
   renderGoogleDriveSyncStatus();
+  savePaintCache();
 }
 
 function escapeHtml(value) {
@@ -3024,8 +3059,8 @@ if (getStoredGuideState() !== null) {
   setGuideOpen(getStoredGuideState() === "true", false);
 }
 bindEvents();
-// 第一次資料渲染完成後才顯示畫面，避免閃出空狀態；safety timeout 確保即使讀取異常也不會卡在隱藏
-const revealApp = () => document.body.classList.remove("app-loading");
-loadData().finally(revealApp);
-setTimeout(revealApp, 3000);
+// 先用上次的畫面快照同步還原並立即顯示，避免第一眼閃 NT$0 / 空白；loadData 會在背景以最新資料覆蓋
+restorePaintCache();
+document.body.classList.remove("app-loading");
+loadData();
 registerServiceWorker();
