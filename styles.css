@@ -1255,6 +1255,7 @@ textarea {
   .cloud-sync-panel .panel-heading {
     display: grid;
     align-items: stretch;
+    gap: 12px;
   }
 
   .cloud-sync-panel .panel-heading > div:first-child {
@@ -1359,6 +1360,18 @@ textarea {
     min-width: 0;
   }
 
+  .cloud-sync-panel {
+    padding: 16px;
+  }
+
+  .cloud-sync-panel .panel-heading {
+    gap: 14px;
+  }
+
+  .cloud-sync-panel .panel-heading p {
+    line-height: 1.45;
+  }
+
   .guide-summary {
     display: grid;
   }
@@ -1455,6 +1468,12 @@ textarea {
   }
 
   .insight-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 430px) {
+  .cloud-sync-actions {
     grid-template-columns: 1fr;
   }
 }
