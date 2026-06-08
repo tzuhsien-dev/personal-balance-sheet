@@ -2988,14 +2988,23 @@ function bindEvents() {
 
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+  // 頁面載入時已有 controller → 代表這次是「更新」而非首次安裝
+  const hadController = Boolean(navigator.serviceWorker.controller);
   try {
     const registration = await navigator.serviceWorker.register("./sw.js", {
       updateViaCache: "none", // 關鍵：每次都向網路抓 sw.js，繞過 iOS HTTP 快取，讓背景能偵測新版
     });
 
+    // 偵測到新版 SW 接管後自動重載一次，補上溫啟動（app 切背景後再開）看不到更新的缺口。
+    // 只有真的有新版才會 controllerchange，一般重整不會觸發；reload 時 app-loading 也會擋掉空狀態，不會閃。
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || refreshing) return; // 首次安裝不重載、避免重入
+      refreshing = true;
+      window.location.reload();
+    });
+
     // 啟動時 + 每次從背景回前景時，主動讓 SW 在背景檢查並更新（iOS PWA 不會自動檢查）。
-    // 不做自動 reload：新版內容會在下次重整 / 重開 app 時，由 sw.js 的 network-first 自動套用，
-    // 這樣才不會每次重整都閃一下畫面。
     const checkForUpdate = () => registration.update().catch(() => {});
     checkForUpdate();
     document.addEventListener("visibilitychange", () => {
