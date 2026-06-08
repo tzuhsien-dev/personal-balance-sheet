@@ -13,7 +13,7 @@
 - `index.html` — 頁面骨架與 `<meta>`（含 `google-client-id`）。
 - `app.js` — 約 115KB 單一檔，幾乎所有邏輯都在這。頂部集中常數（`DB_VERSION`、各 `*_STORAGE_KEY`、門檻天數、`STOCK_QUOTE_API_URL` 等）。
 - `styles.css` — 樣式。
-- `sw.js` — Service Worker，network-first + `skipWaiting()` + `clients.claim()`。
+- `sw.js` — Service Worker，靜態資源 **stale-while-revalidate**（快取瞬間回應、背景更新）+ `skipWaiting()` + `clients.claim()`。
 - `manifest.webmanifest`、`icons/` — PWA manifest 與圖示。
 - `worker/worker.js` + `wrangler.toml` — Cloudflare Worker，與前端**各自獨立部署**。
 
@@ -29,6 +29,20 @@
 一鍵處理：**commit / push 前先跑 `./bump-version.sh`**（遞增上述全部 4 處），再 commit。因為 push 到 `main` 即部署，漏 bump 的那次 deploy 不會被 PWA 抓到。
 
 PWA 自動更新機制：`app.js` 的 `registerServiceWorker()` 用 `updateViaCache: "none"` 抓 `sw.js`，並監聽 `controllerchange` 自動 reload。但若 `sw.js` 內容沒變（版本沒 bump），瀏覽器判定無更新 → 不會觸發更新。所以 bump 是更新生效的觸發點。
+
+## ⚠️ 第二個 gotcha — 防載入閃爍的 paint cache（inline 還原腳本必須與 app.js 同步）
+
+資料存在 IndexedDB（非同步），若什麼都不做，每次載入會先畫出靜態空狀態（NT$0／空清單／空表單），等 `loadData()` 讀完才 `render()` 補真實資料 → 中間那一格就是「閃爍」。
+
+機制：
+- `app.js` 的 `render()` 末尾呼叫 `savePaintCache()`，把畫面快照（各區塊 text / innerHTML / hidden flag / 表單收合狀態 / mobileTab）存進 localStorage（key `finance-ledger-paint-cache`，常數 `PAINT_TEXT_KEYS` / `PAINT_HTML_KEYS` / `PAINT_FLAG_KEYS`）。
+- **`index.html` `</body>` 前有一支 inline 同步 script**，在第一次繪製前（早於被 defer 的 `app.js`）把快照還原上去並移除 `body.app-loading`。返回的使用者第一眼即為上次的真實畫面。
+- `loadData()` 之後 `render()` 再以最新資料無痕覆蓋。
+
+**維護重點**：
+1. 那支 inline 還原腳本的 key 陣列**必須與 `app.js` 的 `PAINT_*` 常數逐字一致**。新增／改名任何快照欄位時，**兩邊都要改**，否則該區塊會重新開始閃。
+2. 快照只在 `render()`（唯一呼叫點在 `loadData()`）時拍攝，此時表單已 reset，所以**不快照表單輸入值**（避免拍到編輯中的表單）。表單的「分類」預設選項寫死在靜態 HTML、日期由 inline 補 today、收合狀態才走快照。
+3. `body` 預設帶 `app-loading` class（CSS 隱藏 `.app-shell`）；inline script 一定會在最後移除它（即使無快照或出錯），不要讓任何路徑漏掉這步，否則畫面會一直隱藏。
 
 ## Deploy
 
