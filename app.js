@@ -351,8 +351,8 @@ function renderGoogleDriveSyncStatus() {
   const lastUploadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY);
   const lastDownloadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_DOWNLOAD_STORAGE_KEY);
   els.googleDriveSignInButton.disabled = !configured;
-  els.uploadGoogleDriveButton.disabled = !configured || !signedIn || (!state.entries.length && !state.snapshots.length);
-  els.downloadGoogleDriveButton.disabled = !configured || !signedIn;
+  els.uploadGoogleDriveButton.disabled = !configured || (!state.entries.length && !state.snapshots.length);
+  els.downloadGoogleDriveButton.disabled = !configured;
   els.googleDriveSignOutButton.disabled = !signedIn;
   els.googleDriveSyncPanel.classList.toggle("configured", configured && signedIn);
   els.googleDriveSyncPanel.classList.toggle("idle", !signedIn);
@@ -362,7 +362,7 @@ function renderGoogleDriveSyncStatus() {
     return;
   }
   if (!signedIn) {
-    els.googleDriveSyncStatusText.textContent = "本機模式。登入 Google 後，同步資料會存到你自己的 Drive app 專用空間。";
+    els.googleDriveSyncStatusText.textContent = "本機模式。按登入或同步時，資料會存到你自己的 Drive app 專用空間。";
     return;
   }
 
@@ -2382,7 +2382,7 @@ function ensureGoogleIdentityServices() {
   });
 }
 
-async function requestGoogleDriveAccess() {
+async function requestGoogleDriveAccess(forceConsent = false) {
   if (!hasGoogleClientId()) {
     showToast("尚未設定 Google Client ID");
     return false;
@@ -2405,7 +2405,7 @@ async function requestGoogleDriveAccess() {
       renderGoogleDriveSyncStatus();
       resolve(true);
     };
-    state.googleTokenClient.requestAccessToken({ prompt: state.googleAccessToken ? "" : "consent" });
+    state.googleTokenClient.requestAccessToken({ prompt: forceConsent || !state.googleAccessToken ? "consent" : "" });
   });
 }
 
@@ -2420,7 +2420,7 @@ function signOutGoogleDrive() {
 
 async function ensureGoogleDriveAccess() {
   if (state.googleAccessToken) return true;
-  return requestGoogleDriveAccess();
+  return requestGoogleDriveAccess(false);
 }
 
 async function googleDriveRequest(url, options = {}) {
@@ -2907,7 +2907,7 @@ function bindEvents() {
   els.clearLocalDataButton.addEventListener("click", clearLocalData);
   els.googleDriveSignInButton.addEventListener("click", async () => {
     try {
-      const signedIn = await requestGoogleDriveAccess();
+      const signedIn = await requestGoogleDriveAccess(true);
       if (signedIn) showToast("已登入 Google");
     } catch (error) {
       showToast(error?.message || "Google 登入失敗", 5000);
