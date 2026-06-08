@@ -2082,18 +2082,8 @@ async function refreshQuote() {
     return;
   }
 
-  const cachedStock = {
-    symbol: els.quoteStatus.dataset.quoteSymbol,
-    price: Number(els.stockPrice.value),
-    priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
-    refreshAfter: els.quoteStatus.dataset.refreshAfter,
-  };
-  if (cachedStock.symbol === symbol && canReuseStockQuote(cachedStock)) {
-    showToast("股價仍在有效期間內，未送出請求");
-    return;
-  }
-
   els.fetchQuoteButton.disabled = true;
+  delete els.quoteStatus.dataset.refreshAfter;
   els.quoteStatus.textContent = "抓取現價中...";
   try {
     const quote = await fetchTwStockQuote(symbol);
