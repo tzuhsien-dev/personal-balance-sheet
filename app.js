@@ -1236,14 +1236,16 @@ function normalizeSnapshot(snapshot) {
 // 把已渲染好的畫面快照存進 localStorage（同步），下次開頁可在 IndexedDB 讀取完成前先「瞬間」畫上去，
 // 避免第一眼閃出 NT$0 / 空白。entryList、snapshotList 用事件委派，還原 innerHTML 後按鈕照常運作。
 const PAINT_CACHE_KEY = "finance-ledger-paint-cache";
-const PAINT_TEXT_KEYS = ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated"];
-const PAINT_HTML_KEYS = ["healthList", "entryList", "allocationList", "snapshotList"];
+const PAINT_TEXT_KEYS = ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated", "backupStatusText", "backupImportText", "backupBadge", "toggleEntriesButton", "toggleSnapshotsButton"];
+const PAINT_HTML_KEYS = ["healthList", "entryList", "allocationList", "snapshotList", "snapshotInsight", "trendChart", "limitDisclosure"];
+const PAINT_FLAG_KEYS = ["emptyState", "toggleEntriesButton", "toggleSnapshotsButton", "limitDisclosure"]; // 用 hidden 切換顯隱的元素
 
 function savePaintCache() {
   try {
     const snapshot = { mobileTab: state.mobileTab };
     for (const key of PAINT_TEXT_KEYS) snapshot[key] = { t: els[key]?.textContent ?? "" };
-    for (const key of PAINT_HTML_KEYS) snapshot[key] = { h: els[key]?.innerHTML ?? "" };
+    for (const key of PAINT_HTML_KEYS) snapshot[key] = { ...(snapshot[key] || {}), h: els[key]?.innerHTML ?? "" };
+    for (const key of PAINT_FLAG_KEYS) snapshot[key] = { ...(snapshot[key] || {}), hidden: !!els[key]?.hidden };
     localStorage.setItem(PAINT_CACHE_KEY, JSON.stringify(snapshot));
   } catch (_) {
     // localStorage 不可用或超量時忽略，純屬載入體驗最佳化

@@ -11,7 +11,7 @@
     <title>財務簿</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=79" />
+    <link rel="stylesheet" href="./styles.css?v=80" />
     <style>
       /* 資料從 IndexedDB 載入前先隱藏內容，避免先閃出空狀態（NT$0 / 尚未建立資料）再跳成真實資料 */
       body.app-loading .app-shell {
@@ -251,7 +251,7 @@
               <button class="chip" type="button" data-filter="limit">額度</button>
             </div>
 
-            <div id="emptyState" class="empty-state">
+            <div id="emptyState" class="empty-state" hidden>
               <strong>先放入第一筆資料</strong>
               <span>可以從銀行餘額、證券戶現金、股票市值或貸款金額開始。</span>
             </div>
@@ -367,13 +367,17 @@
           var raw = localStorage.getItem("finance-ledger-paint-cache");
           if (raw) {
             var s = JSON.parse(raw);
-            ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated"].forEach(function (k) {
+            ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated", "backupStatusText", "backupImportText", "backupBadge", "toggleEntriesButton", "toggleSnapshotsButton"].forEach(function (k) {
               var el = document.getElementById(k);
               if (el && s[k] && typeof s[k].t === "string") el.textContent = s[k].t;
             });
-            ["healthList", "entryList", "allocationList", "snapshotList"].forEach(function (k) {
+            ["healthList", "entryList", "allocationList", "snapshotList", "snapshotInsight", "trendChart", "limitDisclosure"].forEach(function (k) {
               var el = document.getElementById(k);
               if (el && s[k] && typeof s[k].h === "string") el.innerHTML = s[k].h;
+            });
+            ["emptyState", "toggleEntriesButton", "toggleSnapshotsButton", "limitDisclosure"].forEach(function (k) {
+              var el = document.getElementById(k);
+              if (el && s[k] && typeof s[k].hidden === "boolean") el.hidden = s[k].hidden;
             });
             if (s.mobileTab) {
               var main = document.getElementById("appMain");
@@ -384,6 +388,6 @@
         document.body.classList.remove("app-loading");
       })();
     </script>
-    <script src="./app.js?v=79" type="module"></script>
+    <script src="./app.js?v=80" type="module"></script>
   </body>
 </html>
