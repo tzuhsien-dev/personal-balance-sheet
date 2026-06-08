@@ -11,9 +11,15 @@
     <title>財務簿</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=74" />
+    <link rel="stylesheet" href="./styles.css?v=75" />
+    <style>
+      /* 資料從 IndexedDB 載入前先隱藏內容，避免先閃出空狀態（NT$0 / 尚未建立資料）再跳成真實資料 */
+      body.app-loading .app-shell {
+        visibility: hidden;
+      }
+    </style>
   </head>
-  <body>
+  <body class="app-loading">
     <div class="app-shell">
       <header class="topbar">
         <div>
@@ -354,6 +360,6 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=74" type="module"></script>
+    <script src="./app.js?v=75" type="module"></script>
   </body>
 </html>

@@ -3015,5 +3015,8 @@ if (getStoredGuideState() !== null) {
   setGuideOpen(getStoredGuideState() === "true", false);
 }
 bindEvents();
-loadData();
+// 第一次資料渲染完成後才顯示畫面，避免閃出空狀態；safety timeout 確保即使讀取異常也不會卡在隱藏
+const revealApp = () => document.body.classList.remove("app-loading");
+loadData().finally(revealApp);
+setTimeout(revealApp, 3000);
 registerServiceWorker();
