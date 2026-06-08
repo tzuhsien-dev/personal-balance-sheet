@@ -1372,6 +1372,10 @@ textarea {
     line-height: 1.45;
   }
 
+  .cloud-sync-actions {
+    grid-template-columns: 1fr;
+  }
+
   .guide-summary {
     display: grid;
   }
@@ -1468,12 +1472,6 @@ textarea {
   }
 
   .insight-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 430px) {
-  .cloud-sync-actions {
     grid-template-columns: 1fr;
   }
 }
