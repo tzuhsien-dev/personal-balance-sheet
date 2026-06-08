@@ -2988,19 +2988,25 @@ function bindEvents() {
 
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  // 頁面載入時已有 controller → 代表這次是「更新」而非首次安裝
-  const hadController = Boolean(navigator.serviceWorker.controller);
   try {
     const registration = await navigator.serviceWorker.register("./sw.js", {
       updateViaCache: "none", // 關鍵：每次都向網路抓 sw.js，繞過 iOS HTTP 快取
     });
 
-    // 新 SW 接管後自動重新載入一次，取得最新畫面（自動靜默重載）
+    // 只有「app 開著時、於背景偵測到的更新」才自動重載一次。
+    // 一般重整本身就會經由 network-first 抓到最新內容，不需要也不應該再 reload（否則每次重整都會閃）。
+    let allowReload = false;
     let refreshing = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!hadController || refreshing) return;
+      if (!allowReload || refreshing) return;
       refreshing = true;
       window.location.reload();
+    });
+    // 初始載入與其更新檢查穩定之後，才開放自動重載
+    window.addEventListener("load", () => {
+      setTimeout(() => {
+        allowReload = true;
+      }, 1000);
     });
 
     // 啟動時 + 每次從背景回前景時主動檢查更新（iOS PWA 不會自動檢查）
