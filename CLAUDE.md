@@ -39,10 +39,13 @@ PWA 自動更新機制：`app.js` 的 `registerServiceWorker()` 用 `updateViaCa
 - **`index.html` `</body>` 前有一支 inline 同步 script**，在第一次繪製前（早於被 defer 的 `app.js`）把快照還原上去並移除 `body.app-loading`。返回的使用者第一眼即為上次的真實畫面。
 - `loadData()` 之後 `render()` 再以最新資料無痕覆蓋。
 
+**核心原則 — 靜態 HTML 的首次繪製必須等於 JS reset/render 後的狀態。** 任何 init/`render()` 會改動、但靜態 HTML 預設值不同的元素，載入時都會閃（先畫舊樣子、JS 跑完才變）。修「載入閃爍」要**一次盤點所有** init/render 會寫入的 `els.X.(textContent|innerHTML|hidden|disabled|value)`，整批處理，別逐塊猜（這個 bug 曾因逐塊修來回十幾個版本）。資料相依的用快照，確定性的預設狀態直接寫進靜態 HTML。
+
 **維護重點**：
 1. 那支 inline 還原腳本的 key 陣列**必須與 `app.js` 的 `PAINT_*` 常數逐字一致**。新增／改名任何快照欄位時，**兩邊都要改**，否則該區塊會重新開始閃。
 2. 快照只在 `render()`（唯一呼叫點在 `loadData()`）時拍攝，此時表單已 reset，所以**不快照表單輸入值**（避免拍到編輯中的表單）。表單的「分類」預設選項寫死在靜態 HTML、日期由 inline 補 today、收合狀態才走快照。
-3. `body` 預設帶 `app-loading` class（CSS 隱藏 `.app-shell`）；inline script 一定會在最後移除它（即使無快照或出錯），不要讓任何路徑漏掉這步，否則畫面會一直隱藏。
+3. **靜態 HTML 要呈現 reset 後的表單樣子**：預設分類是「現金」，現金名稱固定，所以 `#entryNameField` 預設 `hidden`（對應 `updateCashFields()`）。**改預設分類時，分類選項與名稱欄的隱藏都要連動調整**。
+4. `body` 預設帶 `app-loading` class（CSS 隱藏 `.app-shell`）；inline script 一定會在最後移除它（即使無快照或出錯），不要讓任何路徑漏掉這步，否則畫面會一直隱藏。
 
 ## Deploy
 
