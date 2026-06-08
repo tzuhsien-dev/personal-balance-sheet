@@ -51,7 +51,7 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 2. 交易日盤中（09:00–13:30）按 **更新股價** 取得即時價；若要保存當日收盤價，13:40 後再更新一次。
 3. 選擇月結月份並按 **建立月結**。
 4. 查看月結趨勢與最新月結洞察。
-5. 匯出加密備份，保存到你自己的雲端硬碟或裝置。
+5. 匯出加密備份檔，或上傳 Google Drive。
 
 若要交給其他軟體做資產分析，可使用 **匯出分析**。分析檔未加密，雖已移除名稱、備註等欄位，仍包含財務金額與持股資訊，只應提供給可信任的工具。
 
@@ -87,7 +87,7 @@ Local-first personal balance sheet PWA for monthly asset, liability, credit-limi
 - 月底或月初先更新所有餘額，再建立月結。
 - 若要讓目前股票市值保存當日收盤價，請在交易日 13:40 後按一次 `更新股價`；同一收盤階段再次批次更新會略過已有的有效報價。若單檔價格異常，進入編輯後按 `抓現價` 可強制重新查詢。
 - 股票月結會嘗試用所選月份最後交易日收盤價重算；其他項目使用目前畫面金額。
-- 建立月結後建議立刻匯出加密備份。資料只存在目前瀏覽器，換手機或清除瀏覽器資料前務必先備份。
+- 建立月結後建議立刻匯出加密備份檔或上傳 Google Drive。換手機或清除瀏覽器資料前務必先備份。
 
 ## Deploy / Install
 
@@ -125,7 +125,7 @@ Google Drive 同步是選用功能。GitHub Pages 可以公開；每個使用者
    ```html
    <meta name="google-client-id" content="你的 Google OAuth Client ID" />
    ```
-7. 部署 GitHub Pages 後，在 app 的 **Google Drive 同步** 區塊按 **登入 Google**，再按 **上傳 Google Drive** 或 **下載 Google Drive**。
+7. 部署 GitHub Pages 後，在 app 的 **Google Drive 同步** 區塊按 **上傳 Google Drive** 或 **下載 Google Drive**；需要時會自動開啟 Google 授權。
 
 同步使用 `https://www.googleapis.com/auth/drive.appdata` scope，只讀寫這個 app 在使用者 Google Drive 裡的專用資料。路人甲即使打開公開網站，也只能同步到他自己的 Google Drive，不會碰到你的資料。
 

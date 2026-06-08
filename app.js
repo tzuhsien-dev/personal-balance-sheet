@@ -379,9 +379,9 @@ function renderBackupStatus() {
   if (!hasLocalData && !lastBackupAt) {
     els.backupStatusText.textContent = "目前沒有本機資料。先新增第一筆資料，或用「匯入加密」恢復資料後，再匯出加密備份。";
   } else if (!lastBackupAt) {
-    els.backupStatusText.textContent = "尚未匯出加密備份。月結後建議立刻匯出；請記住密碼，忘記密碼無法還原。";
+    els.backupStatusText.textContent = "尚未完成加密備份。可匯出備份檔或上傳 Google Drive；請記住密碼，忘記密碼無法還原。";
   } else {
-    els.backupStatusText.textContent = `上次匯出加密備份：${formatDateTime(lastBackupAt)}${elapsedDays > 0 ? `，約 ${elapsedDays} 天前` : "，今天"}；請妥善保存密碼。`;
+    els.backupStatusText.textContent = `上次完成加密備份：${formatDateTime(lastBackupAt)}${elapsedDays > 0 ? `，約 ${elapsedDays} 天前` : "，今天"}；請妥善保存密碼。`;
   }
 
   els.backupImportText.textContent = lastImportedExportedAt
@@ -406,16 +406,16 @@ function getBackupHealthStatus() {
     return {
       status: "danger",
       title: "備份逾期",
-      description: lastBackupAt ? `上次匯出已超過 ${BACKUP_OVERDUE_DAYS} 天。` : "這台裝置尚未匯出過備份。",
-      actionHint: "匯出加密備份到 iCloud Drive、Google Drive 或 Dropbox。",
+      description: lastBackupAt ? `上次備份已超過 ${BACKUP_OVERDUE_DAYS} 天。` : "這台裝置尚未完成過加密備份。",
+      actionHint: "匯出加密備份檔，或上傳 Google Drive。",
     };
   }
   if (backupNeeded) {
     return {
       status: "warning",
       title: "月結後待備份",
-      description: "本機資料已更新，但還沒有匯出最新備份。",
-      actionHint: "完成月結或資料調整後，順手匯出加密備份。",
+      description: "本機資料已更新，但還沒有完成最新備份。",
+      actionHint: "完成月結或資料調整後，匯出備份檔或上傳 Google Drive。",
     };
   }
   return null;
@@ -2542,6 +2542,7 @@ async function uploadGoogleDriveData() {
     els.uploadGoogleDriveButton.textContent = "上傳中...";
     await putGoogleDriveSyncPayload(syncPayload);
     localStorage.setItem(GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY, syncPayload.uploadedAt);
+    markBackupCompleted(exportedAt);
     renderGoogleDriveSyncStatus();
     showToast("已上傳 Google Drive");
   } catch (error) {
