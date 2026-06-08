@@ -122,10 +122,8 @@ const els = {
   backupBadge: $("#backupBadge"),
   googleDriveSyncPanel: $("#googleDriveSyncPanel"),
   googleDriveSyncStatusText: $("#googleDriveSyncStatusText"),
-  googleDriveSignInButton: $("#googleDriveSignInButton"),
   uploadGoogleDriveButton: $("#uploadGoogleDriveButton"),
   downloadGoogleDriveButton: $("#downloadGoogleDriveButton"),
-  googleDriveSignOutButton: $("#googleDriveSignOutButton"),
   clearLocalDataButton: $("#clearLocalDataButton"),
   allocationList: $("#allocationList"),
   limitDisclosure: $("#limitDisclosure"),
@@ -350,10 +348,8 @@ function renderGoogleDriveSyncStatus() {
   const signedIn = Boolean(state.googleAccessToken);
   const lastUploadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_UPLOAD_STORAGE_KEY);
   const lastDownloadedAt = localStorage.getItem(GOOGLE_DRIVE_LAST_DOWNLOAD_STORAGE_KEY);
-  els.googleDriveSignInButton.disabled = !configured;
   els.uploadGoogleDriveButton.disabled = !configured || (!state.entries.length && !state.snapshots.length);
   els.downloadGoogleDriveButton.disabled = !configured;
-  els.googleDriveSignOutButton.disabled = !signedIn;
   els.googleDriveSyncPanel.classList.toggle("configured", configured && signedIn);
   els.googleDriveSyncPanel.classList.toggle("idle", !signedIn);
 
@@ -362,11 +358,11 @@ function renderGoogleDriveSyncStatus() {
     return;
   }
   if (!signedIn) {
-    els.googleDriveSyncStatusText.textContent = "本機模式。按登入或同步時，資料會存到你自己的 Drive app 專用空間。";
+    els.googleDriveSyncStatusText.textContent = "本機模式。按上傳或下載時，會向 Google 取得授權。";
     return;
   }
 
-  const details = ["已登入 Google Drive"];
+  const details = ["已取得 Google Drive 授權"];
   if (lastUploadedAt) details.push(`上次上傳：${formatDateTime(lastUploadedAt)}`);
   if (lastDownloadedAt) details.push(`上次下載：${formatDateTime(lastDownloadedAt)}`);
   els.googleDriveSyncStatusText.textContent = details.join("；");
@@ -2409,22 +2405,13 @@ async function requestGoogleDriveAccess(forceConsent = false) {
   });
 }
 
-function signOutGoogleDrive() {
-  if (state.googleAccessToken && window.google?.accounts?.oauth2?.revoke) {
-    google.accounts.oauth2.revoke(state.googleAccessToken, () => {});
-  }
-  state.googleAccessToken = null;
-  renderGoogleDriveSyncStatus();
-  showToast("已登出 Google");
-}
-
 async function ensureGoogleDriveAccess() {
   if (state.googleAccessToken) return true;
   return requestGoogleDriveAccess(false);
 }
 
 async function googleDriveRequest(url, options = {}) {
-  if (!state.googleAccessToken) throw new Error("請先登入 Google");
+  if (!state.googleAccessToken) throw new Error("請先取得 Google Drive 授權");
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -2905,15 +2892,6 @@ function bindEvents() {
     setGuideOpen(els.guideBody.hidden);
   });
   els.clearLocalDataButton.addEventListener("click", clearLocalData);
-  els.googleDriveSignInButton.addEventListener("click", async () => {
-    try {
-      const signedIn = await requestGoogleDriveAccess(true);
-      if (signedIn) showToast("已登入 Google");
-    } catch (error) {
-      showToast(error?.message || "Google 登入失敗", 5000);
-    }
-  });
-  els.googleDriveSignOutButton.addEventListener("click", signOutGoogleDrive);
   els.uploadGoogleDriveButton.addEventListener("click", uploadGoogleDriveData);
   els.downloadGoogleDriveButton.addEventListener("click", downloadGoogleDriveData);
   els.snapshotButton.addEventListener("click", createSnapshot);
