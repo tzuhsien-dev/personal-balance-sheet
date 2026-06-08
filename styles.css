@@ -709,7 +709,7 @@ textarea {
 
 .text-button:disabled {
   opacity: 0.62;
-  cursor: progress;
+  cursor: not-allowed;
 }
 
 .toolbar {
