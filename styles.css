@@ -351,8 +351,6 @@ h3 {
 }
 
 .cloud-sync-panel {
-  display: grid;
-  gap: 14px;
   margin-bottom: 14px;
   border-left: 5px solid var(--line);
 }
@@ -361,15 +359,21 @@ h3 {
   border-left-color: var(--asset);
 }
 
-.cloud-sync-form {
-  display: grid;
-  gap: 12px;
+.cloud-sync-panel .panel-heading {
+  align-items: center;
+  margin-bottom: 0;
 }
 
 .cloud-sync-actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.cloud-sync-actions .text-button {
+  min-height: 40px;
+  white-space: nowrap;
 }
 
 .guide-summary {
@@ -1346,9 +1350,21 @@ textarea {
     justify-items: stretch;
   }
 
+  .cloud-sync-panel .panel-heading {
+    display: grid;
+    align-items: stretch;
+  }
+
   .cloud-sync-actions {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .cloud-sync-actions .text-button {
+    width: 100%;
+    min-width: 0;
   }
 
   .records-panel .panel-heading {
