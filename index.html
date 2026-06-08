@@ -11,7 +11,7 @@
     <title>財務簿</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon.svg" />
-    <link rel="stylesheet" href="./styles.css?v=78" />
+    <link rel="stylesheet" href="./styles.css?v=79" />
     <style>
       /* 資料從 IndexedDB 載入前先隱藏內容，避免先閃出空狀態（NT$0 / 尚未建立資料）再跳成真實資料 */
       body.app-loading .app-shell {
@@ -360,6 +360,30 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=78" type="module"></script>
+    <!-- 第一次繪製前同步還原上次的真實畫面（避免閃 NT$0 / 空白）。key 需與 app.js 的 PAINT_* 常數一致。 -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("finance-ledger-paint-cache");
+          if (raw) {
+            var s = JSON.parse(raw);
+            ["netWorth", "totalAssets", "totalLiabilities", "totalLimits", "lastUpdated"].forEach(function (k) {
+              var el = document.getElementById(k);
+              if (el && s[k] && typeof s[k].t === "string") el.textContent = s[k].t;
+            });
+            ["healthList", "entryList", "allocationList", "snapshotList"].forEach(function (k) {
+              var el = document.getElementById(k);
+              if (el && s[k] && typeof s[k].h === "string") el.innerHTML = s[k].h;
+            });
+            if (s.mobileTab) {
+              var main = document.getElementById("appMain");
+              if (main) main.dataset.mobileTab = s.mobileTab;
+            }
+          }
+        } catch (e) {}
+        document.body.classList.remove("app-loading");
+      })();
+    </script>
+    <script src="./app.js?v=79" type="module"></script>
   </body>
 </html>

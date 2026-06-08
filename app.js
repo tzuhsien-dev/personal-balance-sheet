@@ -1250,22 +1250,8 @@ function savePaintCache() {
   }
 }
 
-function restorePaintCache() {
-  try {
-    const raw = localStorage.getItem(PAINT_CACHE_KEY);
-    if (!raw) return;
-    const snapshot = JSON.parse(raw);
-    for (const key of PAINT_TEXT_KEYS) {
-      if (els[key] && typeof snapshot[key]?.t === "string") els[key].textContent = snapshot[key].t;
-    }
-    for (const key of PAINT_HTML_KEYS) {
-      if (els[key] && typeof snapshot[key]?.h === "string") els[key].innerHTML = snapshot[key].h;
-    }
-    if (snapshot.mobileTab) setMobileTab(snapshot.mobileTab, false);
-  } catch (_) {
-    // 快照損毀時忽略，loadData 會以真實資料重畫
-  }
-}
+// 還原是由 index.html 的 inline script 在「第一次繪製前」同步完成（不必等 app.js 下載解析），
+// 才不會有機率性的空白閃爍。若調整上面的 key，記得同步更新 index.html 內的 inline 還原腳本。
 
 function render() {
   renderSummary();
@@ -3059,8 +3045,7 @@ if (getStoredGuideState() !== null) {
   setGuideOpen(getStoredGuideState() === "true", false);
 }
 bindEvents();
-// 先用上次的畫面快照同步還原並立即顯示，避免第一眼閃 NT$0 / 空白；loadData 會在背景以最新資料覆蓋
-restorePaintCache();
+// 還原 + 顯示改由 index.html 的 inline script 在「第一次繪製前」同步完成（避免機率性閃爍）；此處僅作後備顯示
 document.body.classList.remove("app-loading");
 loadData();
 registerServiceWorker();
