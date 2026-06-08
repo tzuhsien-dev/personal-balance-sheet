@@ -224,6 +224,19 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function dateInputValueFromTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return today();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map(({ type, value: partValue }) => [type, partValue]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
 function currentMonth() {
   return today().slice(0, 7);
 }
@@ -2089,6 +2102,7 @@ async function refreshQuote() {
     const quote = await fetchTwStockQuote(symbol);
     els.stockSymbol.value = quote.symbol;
     els.stockPrice.value = String(quote.price);
+    els.entryDate.value = dateInputValueFromTimestamp(quote.fetchedAt);
     els.quoteStatus.dataset.priceUpdatedAt = quote.fetchedAt;
     els.quoteStatus.dataset.exchange = quote.exchange;
     els.quoteStatus.dataset.priceIsLive = String(quote.isLive);
