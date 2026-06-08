@@ -351,6 +351,7 @@ h3 {
 }
 
 .cloud-sync-panel {
+  margin-top: 14px;
   margin-bottom: 14px;
   border-left: 5px solid var(--line);
 }
