@@ -1,3 +1,4 @@
 preview*.png
 finance-ledger-*.json
 .DS_Store
+.wrangler/

@@ -221,7 +221,7 @@ function formatMoney(value, currency = "TWD") {
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  return dateInputValueFromTimestamp(new Date());
 }
 
 function dateInputValueFromTimestamp(value) {
@@ -468,13 +468,13 @@ function getHealthChecks() {
     });
   }
 
-  const prevCloseStocks = state.entries.filter((entry) => entry.stock?.symbol && entry.stock.priceIsLive === false);
+  const prevCloseStocks = state.entries.filter((entry) => entry.stock?.symbol && entry.stock.priceType === "previousClose");
   if (prevCloseStocks.length) {
     checks.push({
       status: "info",
-      title: "股票價格為昨收",
-      description: `${prevCloseStocks.length} 筆股票目前是昨收價（盤前或收盤後抓取）。`,
-      actionHint: "交易日盤中（09:00–13:30）可更新即時價；13:40 後可再更新一次當日收盤價。",
+      title: "股票價格為前收",
+      description: `${prevCloseStocks.length} 筆股票目前只有前一交易日收盤價。`,
+      actionHint: "交易日開盤後可再更新股價。",
     });
   }
 
@@ -754,6 +754,8 @@ function resetForm() {
   els.stockPrice.value = "";
   delete els.quoteStatus.dataset.priceUpdatedAt;
   delete els.quoteStatus.dataset.exchange;
+  delete els.quoteStatus.dataset.priceDate;
+  delete els.quoteStatus.dataset.priceType;
   delete els.quoteStatus.dataset.priceIsLive;
   delete els.quoteStatus.dataset.refreshAfter;
   delete els.quoteStatus.dataset.quoteSymbol;
@@ -836,7 +838,7 @@ function renderEntries() {
         <article class="entry-row ${entry.type}">
           <div class="entry-main">
             <strong>${escapeHtml(entry.name)}</strong>
-            <span>${entry.category} · ${entry.date}${entry.stock ? ` · ${escapeHtml(entry.stock.symbol)} · ${formatShares(entry.stock.shares)} 股 · ${entry.stock.priceIsLive === false ? "昨收" : "現價"} ${formatPrice(entry.stock.price)}` : ""}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</span>
+            <span>${entry.category} · 盤點 ${entry.date}${entry.stock ? ` · ${escapeHtml(entry.stock.symbol)} · ${formatShares(entry.stock.shares)} 股 · ${stockPriceLabel(entry.stock)} ${formatPrice(entry.stock.price)}${entry.stock.priceDate ? `（${entry.stock.priceDate}）` : ""}` : ""}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</span>
             ${realEstateDetails}
           </div>
           <div class="entry-amount">${entry.type === "liability" ? "-" : ""}${formatMoney(Number(entry.amount), entry.currency)}</div>
@@ -1301,7 +1303,9 @@ function normalizeEntry(entry) {
         ...entry,
         stock: {
           ...entry.stock,
-          refreshAfter: entry.stock.refreshAfter || null,
+          priceDate: entry.stock.priceDate || null,
+          priceType: entry.stock.priceType || (entry.stock.priceIsLive === true ? "live" : "unknown"),
+          refreshAfter: entry.stock.priceType ? entry.stock.refreshAfter || null : null,
         },
       }
     : entry;
@@ -1323,6 +1327,8 @@ async function handleSubmit(event) {
         price: Number(els.stockPrice.value),
         priceUpdatedAt: els.quoteStatus.dataset.priceUpdatedAt || null,
         exchange: els.quoteStatus.dataset.exchange || null,
+        priceDate: els.quoteStatus.dataset.priceDate || null,
+        priceType: els.quoteStatus.dataset.priceType || "manual",
         priceIsLive: els.quoteStatus.dataset.priceIsLive !== "false",
         refreshAfter: els.quoteStatus.dataset.refreshAfter || null,
       }
@@ -1413,11 +1419,13 @@ function editEntry(id) {
   els.stockPrice.value = entry.stock?.price || "";
   els.quoteStatus.dataset.priceUpdatedAt = entry.stock?.priceUpdatedAt || "";
   els.quoteStatus.dataset.exchange = entry.stock?.exchange || "";
+  els.quoteStatus.dataset.priceDate = entry.stock?.priceDate || "";
+  els.quoteStatus.dataset.priceType = entry.stock?.priceType || "";
   els.quoteStatus.dataset.priceIsLive = entry.stock?.priceIsLive === false ? "false" : "true";
   els.quoteStatus.dataset.refreshAfter = entry.stock?.refreshAfter || "";
   els.quoteStatus.dataset.quoteSymbol = entry.stock?.symbol || "";
   els.quoteStatus.textContent = entry.stock?.priceUpdatedAt
-    ? `現價更新：${new Date(entry.stock.priceUpdatedAt).toLocaleString("zh-TW")}`
+    ? `${stockPriceLabel(entry.stock)}更新：${new Date(entry.stock.priceUpdatedAt).toLocaleString("zh-TW")}${entry.stock.priceDate ? ` · 行情日 ${entry.stock.priceDate}` : ""}`
     : "股票市值會用股數 × 現價自動換算。";
   els.realEstateCity.value = entry.realEstate?.city || realEstateCities[0][0];
   els.realEstateDistrict.value = entry.realEstate?.district || "";
@@ -1465,10 +1473,17 @@ async function fetchTwStockQuote(symbol) {
     ) {
       throw new Error("行情服務回傳格式錯誤");
     }
+    const priceType = ["live", "close", "previousClose"].includes(data.priceType)
+      ? data.priceType
+      : data.isLive
+        ? "live"
+        : "unknown";
     return {
       ...data,
       price: Number(data.price),
-      refreshAfter: fallbackQuoteRefreshAfter(data),
+      priceDate: data.priceDate || null,
+      priceType,
+      refreshAfter: priceType === "unknown" ? null : fallbackQuoteRefreshAfter({ ...data, priceType }),
     };
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -1515,8 +1530,11 @@ function currentClosingPriceReadyTime(now = new Date()) {
 
 function fallbackQuoteRefreshAfter(quote, now = new Date()) {
   const closingPriceReady = currentClosingPriceReadyTime(now);
-  if (quote.isLive && now < closingPriceReady) {
+  if (quote.priceType === "live" && now < closingPriceReady) {
     return new Date(Math.min(now.getTime() + 60 * 1000, closingPriceReady.getTime())).toISOString();
+  }
+  if (quote.priceType === "previousClose" && now >= closingPriceReady && isMarketUpdateWindow(new Date(closingPriceReady.getTime() - 1))) {
+    return new Date(now.getTime() + 5 * 60 * 1000).toISOString();
   }
   return clientNextMarketOpen(now).toISOString();
 }
@@ -1529,13 +1547,22 @@ function isMarketUpdateWindow(now = new Date()) {
 
 function canReuseStockQuote(stock, now = Date.now()) {
   if (!(Number(stock?.price) > 0)) return false;
+  if (!["live", "close", "previousClose", "manual"].includes(stock?.priceType)) return false;
   const refreshAfter = Date.parse(stock?.refreshAfter);
   if (Number.isFinite(refreshAfter) && now < refreshAfter) return true;
 
   const parts = taipeiDateParts(new Date(now));
   const minutes = Number(parts.hour) * 60 + Number(parts.minute);
   const isWeekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(parts.weekday);
-  return stock.priceIsLive === false && (!isWeekday || minutes < 9 * 60 || (minutes >= 13 * 60 + 30 && minutes < 13 * 60 + 40));
+  return stock.priceType === "close" && (!isWeekday || minutes < 9 * 60);
+}
+
+function stockPriceLabel(stock) {
+  if (stock?.priceType === "close") return "收盤";
+  if (stock?.priceType === "previousClose") return "前收";
+  if (stock?.priceType === "manual") return "手動價";
+  if (stock?.priceType === "unknown") return "行情";
+  return "現價";
 }
 
 const CORS_PROXIES = [
@@ -2136,16 +2163,18 @@ async function refreshQuote() {
     els.entryDate.value = dateInputValueFromTimestamp(quote.fetchedAt);
     els.quoteStatus.dataset.priceUpdatedAt = quote.fetchedAt;
     els.quoteStatus.dataset.exchange = quote.exchange;
+    els.quoteStatus.dataset.priceDate = quote.priceDate || "";
+    els.quoteStatus.dataset.priceType = quote.priceType;
     els.quoteStatus.dataset.priceIsLive = String(quote.isLive);
     els.quoteStatus.dataset.refreshAfter = quote.refreshAfter;
     els.quoteStatus.dataset.quoteSymbol = quote.symbol;
-    const priceLabel = quote.isLive ? "現價" : "昨收";
-    els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · ${priceLabel} ${formatPrice(quote.price)} · ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
+    const priceLabel = stockPriceLabel(quote);
+    els.quoteStatus.textContent = `${quote.name} ${quote.exchange} · ${priceLabel} ${formatPrice(quote.price)}${quote.priceDate ? ` · 行情日 ${quote.priceDate}` : ""} · 抓取 ${new Date(quote.fetchedAt).toLocaleString("zh-TW")}`;
     if (!els.entryName.value.trim()) {
       els.entryName.value = `${quote.symbol} ${quote.name}`;
     }
     updateStockMarketValue();
-    showToast("已更新現價");
+    showToast(`已更新${priceLabel}`);
   } catch (error) {
     const message = error?.message || "行情服務暫時無法使用";
     if (!isMarketUpdateWindow()) {
@@ -2229,6 +2258,8 @@ async function refreshAllStockQuotes() {
           price: quote.price,
           priceUpdatedAt: quote.fetchedAt,
           exchange: quote.exchange,
+          priceDate: quote.priceDate || null,
+          priceType: quote.priceType,
           priceIsLive: quote.isLive,
           refreshAfter: quote.refreshAfter,
         },
@@ -2236,7 +2267,7 @@ async function refreshAllStockQuotes() {
       };
       await putItem(STORE_ENTRIES, normalizeEntry(nextEntry));
       updated += 1;
-      if (!quote.isLive) prevCloseCount += 1;
+      if (quote.priceType === "previousClose") prevCloseCount += 1;
     } catch (error) {
       failed += 1;
       const reason = error?.message || "行情服務暫時無法使用";
@@ -2261,7 +2292,7 @@ async function refreshAllStockQuotes() {
   els.refreshAllQuotesButton.disabled = false;
   els.refreshAllQuotesButton.textContent = originalText;
   await loadData();
-  const prevCloseNote = prevCloseCount ? `（${prevCloseCount} 筆為昨收）` : "";
+  const prevCloseNote = prevCloseCount ? `（${prevCloseCount} 筆為前收）` : "";
   const skippedNote = skipped ? `，${skipped} 筆已是最新` : "";
   if (failed) {
     const failureSummary = [...failureGroups.entries()]
@@ -2701,6 +2732,8 @@ function toAnalysisEntry(entry, index) {
       shares: Number(entry.stock.shares) || 0,
       price: Number(entry.stock.price) || 0,
       exchange: entry.stock.exchange || null,
+      priceDate: entry.stock.priceDate || null,
+      priceType: entry.stock.priceType || null,
       priceIsLive: entry.stock.priceIsLive !== false,
       priceUpdatedAt: entry.stock.priceUpdatedAt || null,
     };
@@ -2901,6 +2934,8 @@ function bindEvents() {
     if (els.quoteStatus.dataset.quoteSymbol !== els.stockSymbol.value) {
       delete els.quoteStatus.dataset.priceUpdatedAt;
       delete els.quoteStatus.dataset.exchange;
+      delete els.quoteStatus.dataset.priceDate;
+      delete els.quoteStatus.dataset.priceType;
       delete els.quoteStatus.dataset.priceIsLive;
       delete els.quoteStatus.dataset.refreshAfter;
       delete els.quoteStatus.dataset.quoteSymbol;

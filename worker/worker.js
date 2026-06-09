@@ -47,6 +47,11 @@ function isLiveQuote(quote, now = new Date()) {
   return isWeekday && quote.d === today && minutes >= 9 * 60 && minutes <= 13 * 60 + 35;
 }
 
+function quoteDate(value) {
+  const match = String(value || "").match(/^(\d{4})(\d{2})(\d{2})$/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+
 async function requestExchangeQuote(symbol, exchange) {
   const url = new URL(TWSE_QUOTE_URL);
   url.searchParams.set("ex_ch", `${exchange.id}_${symbol}.tw`);
@@ -72,6 +77,7 @@ async function requestExchangeQuote(symbol, exchange) {
     const previousClose = pickPrice(quote.y);
     const price = tradedPrice ?? previousClose;
     if (!(price > 0)) return null;
+    const live = tradedPrice != null && isLiveQuote(quote);
 
     return {
       symbol,
@@ -79,7 +85,9 @@ async function requestExchangeQuote(symbol, exchange) {
       price,
       exchange: exchange.label,
       fetchedAt: new Date().toISOString(),
-      isLive: tradedPrice != null && isLiveQuote(quote),
+      priceDate: tradedPrice != null ? quoteDate(quote.d) : null,
+      priceType: tradedPrice == null ? "previousClose" : live ? "live" : "close",
+      isLive: live,
     };
   } finally {
     clearTimeout(timeoutId);
