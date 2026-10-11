@@ -15,7 +15,6 @@
 - `styles.css` — 樣式。
 - `sw.js` — Service Worker，靜態資源 **stale-while-revalidate**（快取瞬間回應、背景更新）+ `skipWaiting()` + `clients.claim()`。
 - `manifest.webmanifest`、`icons/` — PWA manifest 與圖示。
-- `worker/worker.js` + `wrangler.toml` — Cloudflare Worker，與前端**各自獨立部署**。
 
 資料存瀏覽器 IndexedDB（`finance-ledger-db`），無後端、無登入。
 
@@ -50,7 +49,7 @@ PWA 自動更新機制：`app.js` 的 `registerServiceWorker()` 用 `updateViaCa
 ## Deploy
 
 - **前端**：GitHub Pages，`main` 分支 `/root` 目錄。**push 即部署**，無 build / CI step。
-- **股價 Worker**：`worker/worker.js` 部署到 Cloudflare Worker（轉送台灣證交所 TWSE 公開行情，不接收財務資料）。前端呼叫的網址寫在 `app.js` 的 `STOCK_QUOTE_API_URL`；換網址要同步改這裡。另一個專案 Ledgerly（`~/Developer/ledgerly`）也呼叫這個 Worker：`?symbol=` 的即時報價，以及 `?symbol=&month=YYYY-MM` 的每日收盤價；改回應格式或網址時，兩個專案要一起改。每日收盤價先查證交所，查不到再查 Yahoo（`.TW`、`.TWO`）：櫃買中心會把 Cloudflare Worker 的請求導到錯誤頁，Yahoo 不帶瀏覽器的 User-Agent 會回 429。用 `npx wrangler deploy` 部署。
+- **股價 Worker**：原始碼 2026-10-11 搬到 Ledgerly（`~/Developer/ledgerly/worker/`），在那裡維護與部署，本 repo 不再有 Worker 程式。前端呼叫的網址寫在 `app.js` 的 `STOCK_QUOTE_API_URL`。本專案之後會廢除，功能整合進 Ledgerly。
 
 ## 其他須知
 
