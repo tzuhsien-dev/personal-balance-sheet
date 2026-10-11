@@ -1,5 +1,8 @@
 const TWSE_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp";
+const TWSE_HISTORY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY";
+const TPEX_HISTORY_URL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock";
 const SYMBOL_PATTERN = /^[0-9A-Z]{2,10}$/;
+const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -94,6 +97,76 @@ async function requestExchangeQuote(symbol, exchange) {
   }
 }
 
+/** "115/10/01" (ROC year) to "2026-10-01". */
+function rocDate(value) {
+  const match = String(value || "").trim().match(/^(\d{2,3})\/(\d{2})\/(\d{2})$/);
+  return match ? `${Number(match[1]) + 1911}-${match[2]}-${match[3]}` : null;
+}
+
+function historyPrice(value) {
+  const price = Number(String(value ?? "").replaceAll(",", ""));
+  return price > 0 ? price : null;
+}
+
+function dailyCloses(rows) {
+  return rows
+    .map((row) => ({ date: rocDate(row?.[0]), close: historyPrice(row?.[6]) }))
+    .filter((row) => row.date !== null && row.close !== null);
+}
+
+async function fetchJson(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** Each trading day's close in one month: listed first, then OTC. */
+async function requestMonthCloses(symbol, month) {
+  const [year, monthNumber] = month.split("-");
+  const twse = new URL(TWSE_HISTORY_URL);
+  twse.searchParams.set("date", `${year}${monthNumber}01`);
+  twse.searchParams.set("stockNo", symbol);
+  twse.searchParams.set("response", "json");
+  const listed = await fetchJson(twse);
+  if (listed?.stat === "OK" && Array.isArray(listed.data)) {
+    return { exchange: "上市", closes: dailyCloses(listed.data) };
+  }
+
+  const tpex = new URL(TPEX_HISTORY_URL);
+  tpex.searchParams.set("code", symbol);
+  tpex.searchParams.set("date", `${year}/${monthNumber}/01`);
+  tpex.searchParams.set("response", "json");
+  const otc = await fetchJson(tpex);
+  const rows = otc?.tables?.[0]?.data;
+  if (otc?.stat === "ok" && Array.isArray(rows) && rows.length > 0) {
+    return { exchange: "上櫃", closes: dailyCloses(rows) };
+  }
+  return null;
+}
+
+async function monthClosesResponse(symbol, month) {
+  if (!MONTH_PATTERN.test(month)) {
+    return jsonResponse({ error: "月份格式不正確" }, 400);
+  }
+  try {
+    const history = await requestMonthCloses(symbol, month);
+    if (!history) return jsonResponse({ error: "找不到這個月的收盤價" }, 404);
+    return jsonResponse({ symbol, month, ...history });
+  } catch (error) {
+    const timedOut = error?.name === "AbortError";
+    return jsonResponse({ error: timedOut ? "證交所歷史行情連線逾時" : "證交所歷史行情暫時無法使用" }, timedOut ? 504 : 502);
+  }
+}
+
 export default {
   async fetch(request) {
     if (request.method === "OPTIONS") {
@@ -108,6 +181,8 @@ export default {
     if (!SYMBOL_PATTERN.test(symbol)) {
       return jsonResponse({ error: "股票代號格式不正確" }, 400);
     }
+    const month = requestUrl.searchParams.get("month");
+    if (month !== null) return monthClosesResponse(symbol, month.trim());
 
     const exchanges = [
       { id: "tse", label: "上市" },
