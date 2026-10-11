@@ -106,7 +106,7 @@ GitHub Pages settings:
 1. 在 Cloudflare Dashboard 建立 Worker。
 2. 用 `worker/worker.js` 完整取代預設的 Hello World 程式。
 3. 按 **部署**，確認 `?symbol=2330` 回傳台積電行情 JSON。
-   另外確認 `?symbol=2330&month=2026-10` 回傳該月每個交易日的收盤價（Ledgerly 用來取得期初持股與月底的收盤價）。
+   另外確認 `?symbol=2330&month=2026-10` 回傳該月每個交易日的收盤價（Ledgerly 用來取得期初持股與月底的收盤價）。上市股票先查證交所；上櫃股票，以及證交所查不到時，改查 Yahoo，因為櫃買中心會把來自 Cloudflare Worker 的請求導到錯誤頁。Yahoo 的收盤價和證交所、櫃買中心逐日相同。
 4. 若 Worker 網址不同，修改 `app.js` 的 `STOCK_QUOTE_API_URL`。
 
 目前前端設定的 Worker 網址是：

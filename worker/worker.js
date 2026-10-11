@@ -1,6 +1,11 @@
 const TWSE_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp";
 const TWSE_HISTORY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY";
-const TPEX_HISTORY_URL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock";
+// TPEx turns requests from Cloudflare Workers away, so OTC history comes from Yahoo.
+const YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/";
+// Yahoo answers 429 to requests without a browser User-Agent.
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+const TAIPEI_OFFSET_SECONDS = 8 * 60 * 60;
 const SYMBOL_PATTERN = /^[0-9A-Z]{2,10}$/;
 const MONTH_PATTERN = /^(\d{4})-(0[1-9]|1[0-2])$/;
 
@@ -114,43 +119,73 @@ function dailyCloses(rows) {
     .filter((row) => row.date !== null && row.close !== null);
 }
 
-async function fetchJson(url) {
+async function fetchWithTimeout(url, headers) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
+    return await fetch(url, {
+      headers: { Accept: "application/json", ...headers },
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-/** Each trading day's close in one month: listed first, then OTC. */
-async function requestMonthCloses(symbol, month) {
+/** A listed share's closes in one month from TWSE, or null when TWSE has none or fails. */
+async function requestTwseMonthCloses(symbol, month) {
   const [year, monthNumber] = month.split("-");
-  const twse = new URL(TWSE_HISTORY_URL);
-  twse.searchParams.set("date", `${year}${monthNumber}01`);
-  twse.searchParams.set("stockNo", symbol);
-  twse.searchParams.set("response", "json");
-  const listed = await fetchJson(twse);
-  if (listed?.stat === "OK" && Array.isArray(listed.data)) {
-    return { exchange: "上市", closes: dailyCloses(listed.data) };
+  const url = new URL(TWSE_HISTORY_URL);
+  url.searchParams.set("date", `${year}${monthNumber}01`);
+  url.searchParams.set("stockNo", symbol);
+  url.searchParams.set("response", "json");
+  try {
+    const response = await fetchWithTimeout(url);
+    if (!response.ok) return null;
+    const listed = await response.json();
+    return listed?.stat === "OK" && Array.isArray(listed.data) && listed.data.length > 0
+      ? { exchange: "上市", source: "twse", closes: dailyCloses(listed.data) }
+      : null;
+  } catch {
+    return null;
   }
+}
 
-  const tpex = new URL(TPEX_HISTORY_URL);
-  tpex.searchParams.set("code", symbol);
-  tpex.searchParams.set("date", `${year}/${monthNumber}/01`);
-  tpex.searchParams.set("response", "json");
-  const otc = await fetchJson(tpex);
-  const rows = otc?.tables?.[0]?.data;
-  if (otc?.stat === "ok" && Array.isArray(rows) && rows.length > 0) {
-    return { exchange: "上櫃", closes: dailyCloses(rows) };
+/**
+ * Closes in one month from Yahoo: as a listed share (.TW), then as an OTC
+ * one (.TWO). Its closes match TWSE and TPEx day for day.
+ */
+async function requestYahooMonthCloses(symbol, month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const start = Date.UTC(year, monthNumber - 1, 1) / 1000 - TAIPEI_OFFSET_SECONDS;
+  const end = Date.UTC(year, monthNumber, 1) / 1000 - TAIPEI_OFFSET_SECONDS;
+  for (const [suffix, exchange] of [["TW", "上市"], ["TWO", "上櫃"]]) {
+    const url = new URL(`${YAHOO_CHART_URL}${symbol}.${suffix}`);
+    url.searchParams.set("period1", String(start));
+    url.searchParams.set("period2", String(end));
+    url.searchParams.set("interval", "1d");
+    const response = await fetchWithTimeout(url, { "User-Agent": BROWSER_USER_AGENT });
+    if (response.status === 404) continue;
+    if (!response.ok) throw new Error(`Yahoo HTTP ${response.status}`);
+    const result = (await response.json())?.chart?.result?.[0];
+    const offset = Number(result?.meta?.gmtoffset ?? TAIPEI_OFFSET_SECONDS);
+    const prices = result?.indicators?.quote?.[0]?.close ?? [];
+    const closes = (result?.timestamp ?? [])
+      .map((time, index) => ({
+        date: new Date((time + offset) * 1000).toISOString().slice(0, 10),
+        close: typeof prices[index] === "number" && prices[index] > 0
+          ? Math.round(prices[index] * 100) / 100
+          : null,
+      }))
+      .filter((row) => row.close !== null);
+    if (closes.length > 0) return { exchange, source: "yahoo", closes };
   }
   return null;
+}
+
+/** Each trading day's close in one month: TWSE first, then Yahoo for OTC shares or when TWSE fails. */
+async function requestMonthCloses(symbol, month) {
+  return await requestTwseMonthCloses(symbol, month) ?? await requestYahooMonthCloses(symbol, month);
 }
 
 async function monthClosesResponse(symbol, month) {
@@ -163,7 +198,7 @@ async function monthClosesResponse(symbol, month) {
     return jsonResponse({ symbol, month, ...history });
   } catch (error) {
     const timedOut = error?.name === "AbortError";
-    return jsonResponse({ error: timedOut ? "證交所歷史行情連線逾時" : "證交所歷史行情暫時無法使用" }, timedOut ? 504 : 502);
+    return jsonResponse({ error: timedOut ? "歷史行情連線逾時" : "歷史行情暫時無法使用" }, timedOut ? 504 : 502);
   }
 }
 
